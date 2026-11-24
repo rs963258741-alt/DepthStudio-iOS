@@ -1,0 +1,126 @@
+--- V8.16
++++ V8.17
+@@ -4,7 +4,7 @@
+ <meta charset="utf-8">
+ <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+ <meta name="theme-color" content="#07111b">
+-<title>Depth Studio｜潛水影像 HUD 預覽 V8.16</title>
++<title>Depth Studio｜潛水影像 HUD 預覽 V8.17</title>
+ <style>
+ :root{--cyan:#62e7ff;--blue:#168cff;--bg:#07111b;--hud-scale:1}
+ *{box-sizing:border-box}
+@@ -82,7 +82,7 @@
+ </style>
+ </head>
+ <body>
+-<header><div class="brand">DEPTH <span>STUDIO</span></div><div class="tag">WEB PREVIEW · HUD V8.16</div></header>
++<header><div class="brand">DEPTH <span>STUDIO</span></div><div class="tag">WEB PREVIEW · HUD V8.17</div></header>
+ <main>
+ <section class="left panel"><h2>影像與 HUD 預覽</h2>
+ <div class="preview" id="stage">
+@@ -129,7 +129,7 @@
+ </section>
+ <section class="right">
+ <div class="panel"><h2>01 / 匯入素材</h2><div class="field"><label>潛水影片（MP4 / MOV）</label><input id="videoFile" type="file" accept="video/*"></div>
+-<div class="field"><label>潛水紀錄（UDDF）</label><input id="uddfFile" type="file" accept=".uddf,.xml,text/xml"></div>
++<div class="field"><label>潛水紀錄（UDDF／Garmin FIT）</label><input id="uddfFile" type="file" accept=".uddf,.xml,.fit,application/xml,text/xml"></div><p class="sub">支援 ATMOS UDDF，以及 Garmin Dive／Garmin Connect 匯出的單筆潛水 FIT；FIT 檔需包含時間戳與深度樣本。</p>
+ <div class="actions"><button id="loadDemo" class="secondary">載入示範潛水資料</button><button id="reset">重設外觀</button></div><div class="status" id="status">尚未匯入檔案。可先載入示範資料體驗介面。</div></div>
+ <div class="panel"><h2>02 / HUD 外觀與自由排版</h2>
+ <div class="actions"><button id="editLayout">拖曳排版：關</button><button id="resetLayout" class="secondary">恢復預設位置</button></div>
+@@ -163,10 +163,10 @@
+ <div class="field"><label for="divingTypeSelect">潛水種類</label><select id="divingTypeSelect" style="width:100%;padding:11px 12px;border-radius:10px;background:#0a2030;border:1px solid #32627a;color:#eaf7ff;font-size:14px"><option value="CWTB" selected>CWTB</option><option value="CNF">CNF</option><option value="CWT">CWT</option><option value="FIM">FIM</option><option value="VWT">VWT</option><option value="DPV">DPV</option></select></div>
+ <p class="name-field-note">國旗固定在姓名左側；潛水種類會以獨立 HUD 欄位顯示在姓名旁邊，可自行移動、縮放、旋轉及設定顯示／隱藏。</p>
+ </div>
+-<div class="panel"><h2>05 / 潛水紀錄摘要</h2><div class="stats"><div class="stat"><strong id="sumMax">11.9 m</strong><span>最大深度</span></div><div class="stat"><strong id="sumAvg">6.9 m</strong><span>平均深度</span></div><div class="stat"><strong id="sumDur">36 s</strong><span>紀錄時間</span></div></div><p class="sub" id="recordInfo">示範資料：ATMOS Mission2。載入你的 UDDF 後會嘗試讀取實際紀錄。</p></div>
+-<div class="panel"><h2>06 / 輸出影片</h2><p class="sub">V8.16：沿用成功版本的 OPFS 分塊寫入與 Service Worker 下載流程；新增 MP4 容器、影片軌道與封包驗證。</p><div class="actions"><button id="exportVideoBtn" disabled>輸出高畫質影片（至少 4K）</button></div><progress id="exportProgress" max="100" value="0" hidden></progress><div class="export-note" id="exportElapsed" aria-live="polite"></div>
+-<progress id="downloadProgress" max="100" value="0" hidden></progress><div class="export-note" id="downloadStatus" aria-live="polite" hidden></div><div class="actions" style="margin-top:8px"><button id="saveToPhotosBtn" type="button" style="display:none">使用 iPhone 分享選單儲存（可選「儲存到檔案」）</button><a id="exportDownload" role="button">下載完成影片（MP4）</a><a id="exportDownloadFallback" role="button" style="display:none;text-decoration:none;background:#18394e;color:#d9f6ff;border:1px solid #32627a;font-size:13px;font-weight:800;padding:11px 14px;border-radius:11px;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;touch-action:manipulation">備用：直接下載檔案</a><button id="recoverPreviousBtn" type="button" style="display:none">找回上次已完成的影片</button></div><div class="export-note" id="exportInfo">V8.16 沿用你提供的 V8.13／V8.12 下載與 MP4 寫入方式；下載前先確認 ftyp、mdat、moov、影片軌道、解析度、可解碼性及封包。</div></div>
+-<div class="panel"><h2>07 / 目前版本說明</h2><p class="sub">V8.16 保留既有 HUD、UDDF、姓名與排版設定；沿用 V8.13 的 Service Worker 串流下載及直接檔案備援，新增 MP4 完整性驗證。</p></div>
++<div class="panel"><h2>05 / 潛水紀錄摘要</h2><div class="stats"><div class="stat"><strong id="sumMax">11.9 m</strong><span>最大深度</span></div><div class="stat"><strong id="sumAvg">6.9 m</strong><span>平均深度</span></div><div class="stat"><strong id="sumDur">36 s</strong><span>紀錄時間</span></div></div><p class="sub" id="recordInfo">示範資料：ATMOS Mission2。載入你的 UDDF 或 Garmin FIT 後會嘗試讀取實際紀錄。</p></div>
++<div class="panel"><h2>06 / 輸出影片</h2><p class="sub">V8.17：保留 V8.16 已驗證的影片輸出流程；新增 Garmin FIT 潛水資料匯入，原有 UDDF 解析不變。</p><div class="actions"><button id="exportVideoBtn" disabled>輸出高畫質影片（至少 4K）</button></div><progress id="exportProgress" max="100" value="0" hidden></progress><div class="export-note" id="exportElapsed" aria-live="polite"></div>
++<progress id="downloadProgress" max="100" value="0" hidden></progress><div class="export-note" id="downloadStatus" aria-live="polite" hidden></div><div class="actions" style="margin-top:8px"><button id="saveToPhotosBtn" type="button" style="display:none">使用 iPhone 分享選單儲存（可選「儲存到檔案」）</button><a id="exportDownload" role="button">下載完成影片（MP4）</a><a id="exportDownloadFallback" role="button" style="display:none;text-decoration:none;background:#18394e;color:#d9f6ff;border:1px solid #32627a;font-size:13px;font-weight:800;padding:11px 14px;border-radius:11px;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;touch-action:manipulation">備用：直接下載檔案</a><button id="recoverPreviousBtn" type="button" style="display:none">找回上次已完成的影片</button></div><div class="export-note" id="exportInfo">V8.17 保留 V8.16 的影片輸出與 MP4 驗證；新增官方 Garmin FIT 解碼，並轉成既有 HUD 共用資料格式。</div></div>
++<div class="panel"><h2>07 / 目前版本說明</h2><p class="sub">V8.17 保留既有 HUD、UDDF、姓名與排版設定；沿用 V8.13 的 Service Worker 串流下載及直接檔案備援，新增 MP4 完整性驗證。</p></div>
+ </section>
+ </main>
+ <script>
+@@ -298,10 +298,36 @@
+ function startAnimation(){if(rafId===null)rafId=requestAnimationFrame(animationLoop)}
+ $('videoFile').addEventListener('change',e=>{const file=e.target.files?.[0];if(!file)return;if(activeExportUrl){URL.revokeObjectURL(activeExportUrl);activeExportUrl=null;}resetDownloadProgress();lastExportBlob=null;$('exportDownload').style.display='none';$('exportDownload').removeAttribute('href');$('exportDownloadFallback').style.display='none';$('exportDownloadFallback').removeAttribute('href');$('saveToPhotosBtn').style.display='none';if(videoURL)URL.revokeObjectURL(videoURL);videoURL=URL.createObjectURL(file);$('video').src=videoURL;$('video').style.display='block';$('empty').style.display='none';$('status').textContent='已載入影片：'+file.name;updateAt()});
+ $('video').addEventListener('play',startAnimation);['timeupdate','seeked','seeking','loadedmetadata','pause','ended'].forEach(evt=>$('video').addEventListener(evt,updateAt));
++async function importGarminFitFile(file){
++  $('status').textContent='正在載入 Garmin FIT 解碼器並分析潛水深度資料…';
++  const importerUrl=new URL('./fit-import.js',document.baseURI).href;
++  const {parseGarminFitFile}=await import(importerUrl);
++  if(typeof parseGarminFitFile!=='function')throw new Error('FIT 匯入模組缺少解析功能，請確認 fit-import.js 已上傳至專案根目錄。');
++  const result=await parseGarminFitFile(file);
++  // Only replace the active dive profile after the entire FIT file has passed validation.
++  samples=result.samples;
++  refreshSampleCache();
++  maxD=result.maxDepth;
++  avgD=result.avgDepth;
++  duration=result.duration;
++  $('sumMax').textContent=maxD.toFixed(1)+' m';
++  $('sumAvg').textContent=avgD.toFixed(1)+' m';
++  $('sumDur').textContent=fmtTime(duration);
++  const meta=result.metadata||{};
++  $('recordInfo').textContent=`已讀取 Garmin FIT：${file.name}；裝置／型號 ${meta.modelName||'Garmin'}；${meta.profileText||'FIT Profile'}；深度樣本 ${samples.length} 筆。`;
++  $('status').textContent=`Garmin FIT 已載入：${samples.length} 個有效深度樣本；最大深度 ${maxD.toFixed(1)} m；${meta.temperatureSampleCount?`已取得 ${meta.temperatureSampleCount} 筆溫度資料。`:'檔案未提供溫度資料，HUD 水溫欄將顯示 --。'}時間軸以第一筆深度樣本為 00:00，可用「影片與潛水資料時間差」微調同步。`;
++  drawProfile();
++  updateAt();
++}
++
+ $('uddfFile').addEventListener('change',async e=>{
+   const file=e.target.files?.[0];
+   if(!file)return;
+   try{
++    if(/\.fit$/i.test(file.name||'')){
++      await importGarminFitFile(file);
++      return;
++    }
+     const xml=new DOMParser().parseFromString(await file.text(),'application/xml');
+     if(xml.querySelector('parsererror'))throw Error('UDDF XML 格式無法解析');
+     const nodes=[...xml.getElementsByTagName('*')].filter(n=>n.localName?.toLowerCase()==='waypoint');
+@@ -642,7 +668,7 @@
+   if(ftypIndex!==0)throw new Error('MP4 缺少開頭 ftyp 區塊。');
+   if(moovIndex<0)throw new Error('MP4 缺少 moov 影片索引中繼資料。');
+   if(mdatIndex<0)throw new Error('MP4 缺少 mdat 媒體資料。');
+-  // V8.16 uses fastStart:false, so moov may correctly appear after mdat.
++  // V8.17 uses fastStart:false, so moov may correctly appear after mdat.
+   // Do not reject this valid layout: iOS should receive the entire completed file.
+   return {boxCount,size:file.size,moovAfterMdat:moovIndex>mdatIndex};
+ }
+@@ -790,7 +816,7 @@
+ }
+ $('recoverPreviousBtn').addEventListener('click',recoverPreviousExport);
+ 
+-// V8.16 keeps the V8.12 proven OPFS / Service Worker download pipeline unchanged.
++// V8.17 keeps the V8.12 proven OPFS / Service Worker download pipeline unchanged.
+ // Important: the service-worker link MUST NOT have the HTML download attribute.
+ // Browsers may route <a download> requests directly to the download manager and
+ // Post-export MP4 rereads and second-pass packet validation remain disabled.
+@@ -887,7 +913,7 @@
+     const pixelsPerSecond=outW*outH*srcStats.fps;
+     const targetBitrate=Math.ceil(Math.max(sourceBitrate*1.05,pixelsPerSecond*.10));
+     const approxSizeMB=targetBitrate*sourceDuration/8/1e6;
+-    outputFileName=sourceFile.name.replace(/\.[^.]+$/,'')+'_DepthStudio_V8-16_4K.mp4';
++    outputFileName=sourceFile.name.replace(/\.[^.]+$/,'')+'_DepthStudio_V8-17_4K.mp4';
+     $('exportInfo').textContent=`來源 ${sourceWidth} × ${sourceHeight}；輸出目標 ${outW} × ${outH}${targetSize.upscaled?'（升頻 4K）':'（保留原生 4K 以上尺寸）'}；來源 ${srcStats.fps.toFixed(3)} FPS、${srcStats.count.toLocaleString()} 幀；來源影片軌 ${(sourceBitrate/1e6).toFixed(2)} Mbps；預估檔案約 ${approxSizeMB.toFixed(0)} MB。`;
+     phase('正在檢查 4K 編碼能力…',6);
+     const quality=new Quality({bitrate:targetBitrate});let codec=null;
+@@ -953,7 +979,7 @@
+     const containerCheck=await validateMp4Container(blob);
+     phase('正在檢查影片軌道、編碼與影格封包…',97);
+     const verification=await verifyMp4Blob(MB,blob,srcStats,targetSize,sourceDuration,!!audioTrack);
+-    await attachExportDownload(blob,sourceFile,'V8-16',destination?.fileHandle||null);
++    await attachExportDownload(blob,sourceFile,'V8-17',destination?.fileHandle||null);
+     outputVerified=true;
+     lastExportFilename=blob.name||outputFileName;
+     $('exportProgress').value=100;
+@@ -972,7 +998,7 @@
+           await validateMp4Container(recovered);
+           await verifyMp4Blob(mediaModule,recovered,verificationContext.srcStats,verificationContext.targetSize,verificationContext.sourceDuration,verificationContext.sourceHasAudio);
+           blob=recovered;
+-          await attachExportDownload(blob,sourceFile,'V8-16',destination?.fileHandle||null);
++          await attachExportDownload(blob,sourceFile,'V8-17',destination?.fileHandle||null);
+           outputVerified=true;
+           lastExportFilename=blob.name||outputFileName;
+         }

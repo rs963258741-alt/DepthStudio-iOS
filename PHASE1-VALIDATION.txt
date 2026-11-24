@@ -1,0 +1,22 @@
+Depth Studio Native APP Migration — Phase 1
+
+Validated in this environment:
+- swiftc -frontend -parse *.swift: PASS
+- GarminFITParser.swift type-shape check using local stubs matching published Garmin ObjcFIT/SwiftFIT declarations: PASS
+- project.yml YAML parse and FIT package/source registration checks: PASS
+- node --test tests/fit-import.test.mjs: 9/9 PASS
+- Protected website and original APP core files compared against supplied archive: unchanged except ContentView.swift and project.yml which were intentionally modified.
+
+Not run here:
+- xcodegen generate / xcodebuild (no Xcode or iOS SDK in this Linux environment)
+- Garmin package resolution by Swift Package Manager
+- real-device FIT decode / UDDF regression / video preview / export
+
+FIT dependency:
+- Official Garmin FIT Objective-C/C++ + SwiftFIT package
+- https://github.com/garmin/fit-objective-c-sdk.git
+- Pinned revision: c952434903a440ff44649ffa7f8c967a692f4b19 (Garmin FIT SDK 21.222.0)
+
+Scope:
+- This is Phase 1: native FIT + UDDF file import into the shared DiveRecord model.
+- Native full HUD editor and native MP4 exporter parity are not yet implemented.

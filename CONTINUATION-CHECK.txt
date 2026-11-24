@@ -1,0 +1,28 @@
+Depth Studio — Continuation Check
+Date: 2026-11-24
+Base archive: latest user-uploaded DepthStudio-main(2).zip
+
+Confirmed source relationship
+- DepthStudio-main(1).zip and DepthStudio-main(2).zip are byte-identical.
+- The uploaded base archive does not contain GarminFITParser.swift, the FIT Swift Package dependency, or the native FIT import changes.
+- This continuation package restores the previously prepared Phase 1 native FIT + UDDF import work on that exact base.
+
+Checks run in this environment
+- `node --test tests/fit-import.test.mjs`: PASS (9/9 tests).
+- `swiftc -frontend -parse *.swift`: PASS.
+- `project.yml` YAML parsing and FIT package/source/dependency declaration checks: PASS.
+- Protected website/core files compared against the uploaded base: unchanged.
+
+Not verified here
+- XcodeGen project generation and Xcode/iOS SDK build (Xcode is unavailable in this Linux environment).
+- Swift Package Manager resolution of Garmin FIT SDK.
+- FIT and UDDF decoding on a physical iPhone.
+- Native video export quality, audio retention, and saving to Files/Photos.
+
+Next gate before Phase 2
+1. Run the `depth-studio-unsigned-ios` Codemagic workflow.
+2. Confirm the Xcode project resolves the pinned FIT package and builds.
+3. On iPhone, import one known Garmin FIT dive and one known ATMOS UDDF dive.
+4. Compare the depth curve, maximum/average depth, timestamps, and temperature values with the website V8.18 output.
+
+Do not treat syntax parsing or JavaScript tests as proof of an iOS build or real-device FIT decoding.

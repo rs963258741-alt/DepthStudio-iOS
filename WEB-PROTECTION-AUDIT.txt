@@ -1,0 +1,41 @@
+Depth Studio — Web Protection Audit
+Date: 2026-11-24
+
+RESULT: WEB RUNTIME FILES ARE BYTE-IDENTICAL TO BOTH THE USER'S UPLOADED BASE ARCHIVE AND THE V8.18 WEB PREVIEW ARCHIVE.
+
+Protected runtime file SHA-256:
+index.html     3c9f6ce874319c99da8935322b8412ba3c3519b162edb832327ae62c74478c36
+fit-import.js  5f726d9bdacfeb4465081af0d3b831b65209ba264d870f06de610bf13760ea67
+sw.js          1589f12181ad091efeb28ecbf4d4b1b6b1118077ae648a68667e879aea4f4a49
+
+The three hashes above were independently calculated from:
+1. DepthStudio-main(2).zip (latest user-uploaded repository archive)
+2. DepthStudio_WebPreview_V8_18(1).zip (V8.18 web reference)
+3. DepthStudio_Native_Phase1_Continuation.zip (this delivery)
+
+All three files match exactly across all three sources. They were not edited by the native Phase 1 migration.
+
+Repository diff against the latest user-uploaded archive:
+- Existing website runtime files: unchanged.
+- Existing GitHub Pages workflow and codemagic.yaml: unchanged.
+- Native app changes: ContentView.swift and project.yml updated; GarminFITParser.swift and migration notes added.
+- README.md updated with migration notes.
+- FIT test moved from the repository root to tests/ to match the documented test command.
+
+VALIDATION RUN:
+- node --test tests/fit-import.test.mjs: PASS (9/9)
+- swiftc -frontend -parse *.swift: PASS (syntax parsing only)
+- project.yml YAML parse and FIT source/package registration checks: PASS
+- SHA-256 comparison of index.html, fit-import.js, sw.js across the three archives: PASS
+
+IMPORTANT LIMITATION:
+This is NOT a completed native feature migration. The current native app is Phase 1 only.
+- Native FIT import has not been validated against a real Garmin dive FIT file on iPhone.
+- Native UDDF has parity gaps: duplicate timestamps are not collapsed; temperature parsing currently only accepts Kelvin-like values (200...350), while the web importer preserves already-Celsius values.
+- The UI only exposes a single time offset; two-anchor sync is not wired to the UI.
+- The preview only offers whole-HUD drag, opacity, and scale; independent widget visibility/editing, rotation snapping, alignment guides, and identity controls are not ported.
+- DiveVideoExporter.swift is not called by ContentView. It is a draft, not a user-accessible export workflow; it does not enforce/verify the V8.18 4K export requirements or provide the complete save flow.
+- XcodeGen generation, Xcode/iOS build, Garmin Swift Package resolution, real-device import, and video export were not run in this Linux environment.
+
+DO NOT describe this package as feature-complete until those gaps are fixed and tested.
+To preserve the website, keep index.html, fit-import.js and sw.js in the GitHub Pages publishing root without editing or renaming them.
