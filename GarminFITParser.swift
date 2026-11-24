@@ -137,10 +137,15 @@ final class GarminFITParser {
                 return definition.getFieldNameforIndex(fieldIndex)
             }
             let name = names.joined(separator: " ")
-            guard name.range(of: "water.*temp|temp.*water", options: [.regularExpression, .caseInsensitive]) != nil,
-                  let rawValue = field.getValueForIndex(0)?.doubleValue else {
+            guard name.range(of: "water.*temp|temp.*water", options: [.regularExpression, .caseInsensitive]) != nil else {
                 continue
             }
+
+            // Garmin FIT SDK 21.222.0 imports getValueForIndex(_:) as a
+            // non-optional NSNumber because its Objective-C declaration is
+            // inside NS_ASSUME_NONNULL, so optional chaining does not compile.
+            let rawValue = field.getValueForIndex(0).doubleValue
+            guard rawValue.isFinite else { continue }
 
             let scale = definition.isScaleValid() ? max(1.0, Double(definition.getScale())) : 1.0
             let offset = definition.isOffsetValid() ? Double(definition.getOffset()) : 0.0
