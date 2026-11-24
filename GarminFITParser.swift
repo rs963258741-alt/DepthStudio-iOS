@@ -141,10 +141,9 @@ final class GarminFITParser {
                 continue
             }
 
-            // Garmin FIT SDK 21.222.0 imports getValueForIndex(_:) as a
-            // non-optional NSNumber because its Objective-C declaration is
-            // inside NS_ASSUME_NONNULL, so optional chaining does not compile.
-            let rawValue = field.getValueForIndex(0).doubleValue
+            // The Objective-C selector getValueForIndex: is imported into
+            // Swift as getValueFor(_:). The SDK declares NSNumber as non-null.
+            let rawValue = field.getValueFor(0).doubleValue
             guard rawValue.isFinite else { continue }
 
             let scale = definition.isScaleValid() ? max(1.0, Double(definition.getScale())) : 1.0
