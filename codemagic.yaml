@@ -1,17 +1,24 @@
 workflows:
   depth-studio-unsigned-ios:
-    name: Depth Studio · unsigned iOS build
+    name: Depth Studio · unsigned iOS build + IPA
     max_build_duration: 60
     instance_type: mac_mini_m2
     environment:
       xcode: latest
     scripts:
       - name: Install XcodeGen
-        script: brew install xcodegen
+        script: |
+          set -euo pipefail
+          if ! command -v xcodegen >/dev/null 2>&1; then
+            brew install xcodegen
+          fi
       - name: Generate Xcode project
-        script: xcodegen generate --spec project.yml
+        script: |
+          set -euo pipefail
+          xcodegen generate --spec project.yml
       - name: Build unsigned iOS app
         script: |
+          set -euo pipefail
           xcodebuild \
             -project DepthStudio.xcodeproj \
             -scheme DepthStudio \
@@ -20,6 +27,50 @@ workflows:
             -derivedDataPath build/DerivedData \
             CODE_SIGNING_ALLOWED=NO \
             build
+      - name: Package unsigned IPA for AltStore
+        script: |
+          set -euo pipefail
+
+          APP_DIR="build/DerivedData/Build/Products/Debug-iphoneos"
+          APP_PATH="$(find "$APP_DIR" -maxdepth 1 -type d -name '*.app' -print -quit)"
+
+          if [[ -z "$APP_PATH" || ! -d "$APP_PATH" ]]; then
+            echo "ERROR: No .app bundle found in $APP_DIR"
+            exit 1
+          fi
+
+          if [[ ! -f "$APP_PATH/Info.plist" ]]; then
+            echo "ERROR: App bundle is missing Info.plist: $APP_PATH"
+            exit 1
+          fi
+
+          if [[ ! -f "$APP_PATH/Assets.car" ]]; then
+            echo "ERROR: Assets.car was not generated. Check the AppIcon asset catalog."
+            exit 1
+          fi
+
+          IPA_WORK="build/ipa-work"
+          rm -rf "$IPA_WORK"
+          mkdir -p "$IPA_WORK/Payload"
+
+          APP_NAME="$(basename "$APP_PATH")"
+          ditto "$APP_PATH" "$IPA_WORK/Payload/$APP_NAME"
+
+          REPO_ROOT="$PWD"
+          (
+            cd "$IPA_WORK"
+            /usr/bin/zip -qry "$REPO_ROOT/build/DepthStudio.ipa" Payload
+          )
+
+          if [[ ! -s build/DepthStudio.ipa ]]; then
+            echo "ERROR: IPA packaging failed or produced an empty file."
+            exit 1
+          fi
+
+          /usr/bin/unzip -t build/DepthStudio.ipa
+          /usr/bin/unzip -l build/DepthStudio.ipa | grep -q 'Payload/.*\.app/Info.plist'
+          echo "IPA created: build/DepthStudio.ipa"
     artifacts:
+      - build/DepthStudio.ipa
       - build/DerivedData/Build/Products/Debug-iphoneos/*.app
       - /tmp/xcodebuild_logs/*.log

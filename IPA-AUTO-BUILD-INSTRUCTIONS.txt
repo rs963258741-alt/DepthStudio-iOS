@@ -1,0 +1,30 @@
+DepthStudio-iOS — IPA Auto-Build package
+
+This is a full project snapshot based on the current main branch of:
+https://github.com/rs963258741-alt/DepthStudio-iOS
+
+What changed in this package:
+- codemagic.yaml only: after Xcode builds the unsigned .app, the workflow validates it and packages build/DepthStudio.ipa with the standard Payload/<App>.app structure.
+- The workflow publishes build/DepthStudio.ipa as a Codemagic artifact.
+- Existing Swift source, AppIcon asset catalog, project.yml, FIT/UDDF support, and web files are retained from the current repository snapshot.
+
+Upload guidance:
+1. Extract this ZIP.
+2. Upload the CONTENTS of the DepthStudio-iOS folder to the ROOT of the DepthStudio-iOS GitHub repository (main branch), replacing same-named files.
+3. Do NOT upload this package to the web DepthStudio repository.
+4. Commit the changes.
+5. Run the existing workflow: Depth Studio · unsigned iOS build + IPA.
+6. Download build/DepthStudio.ipa from Codemagic artifacts.
+
+Signing note:
+The IPA is intentionally unsigned. Import it into AltStore, which will sign it with the Apple ID configured in AltStore. It is not an App Store distribution IPA.
+
+Privacy note:
+Before uploading, check GitHub repository Settings > General > Danger Zone > Change repository visibility. The repository visibility observed by the connected GitHub service at packaging time was Public. Change it to Private if you intend to keep the source private.
+
+Validation performed locally:
+- YAML parsed successfully.
+- The package script passed bash syntax validation.
+- Icon asset JSON parsed successfully.
+- AppIcon.png verified as a 1024x1024 PNG.
+- This environment cannot run Xcode, so a successful Codemagic build and iPhone install still need to be confirmed.
