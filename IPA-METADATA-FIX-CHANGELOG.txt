@@ -1,0 +1,13 @@
+Depth Studio iOS IPA metadata fix
+
+Problem found in the uploaded Codemagic log:
+CFBundleShortVersionString was missing from the generated app Info.plist, causing the packaging validation step to stop.
+
+Changes in this update:
+- project.yml now includes MARKETING_VERSION=1.0.0 and CURRENT_PROJECT_VERSION=1.
+- The Codemagic validation/package step now inserts CFBundleShortVersionString and CFBundleVersion into the built app Info.plist if XcodeGen/Xcode leaves them out.
+- The workflow verifies Bundle ID, app executable, Assets.car, FIT_cppfit.bundle, and both version keys before and after IPA packaging.
+- Release build and existing source files are retained.
+
+No Swift source files, web app files, or existing project features were changed in this fix.
+The Xcode build still must be run in Codemagic to verify the final artifact.
