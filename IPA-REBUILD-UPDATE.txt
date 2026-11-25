@@ -1,0 +1,16 @@
+Depth Studio — IPA rebuild update
+
+This package is based on the current DepthStudio-iOS main-branch project snapshot.
+
+Changes in this rebuild:
+1. Adds CFBundleShortVersionString = 1.0.0 and CFBundleVersion = 1 to the iOS target's generated Info.plist settings.
+2. Builds the iOS app in Release configuration instead of Debug.
+3. Validates Bundle ID, app executable, Info.plist, Assets.car, and FIT_cppfit.bundle before packaging.
+4. Uses Apple's /usr/bin/ditto to create the IPA with Payload at the archive root.
+5. Reopens the generated IPA and validates the app bundle and version metadata before publishing it as a Codemagic artifact.
+
+The app remains unsigned at build time. AltStore/AltServer is expected to sign it for installation.
+
+The source Swift files, web preview files, FIT import JavaScript, and existing app icon assets are retained. This package is for the DepthStudio-iOS repository only, not the separate web repository.
+
+Not yet verified: a fresh Xcode build on Codemagic and an actual AltStore installation. Those must pass before considering the IPA installable.
