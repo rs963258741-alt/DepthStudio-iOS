@@ -22,6 +22,7 @@ targets:
     type: application
     platform: iOS
     sources:
+      - path: Assets.xcassets
       - path: AtmosUDDFParser.swift
       - path: ContentView.swift
       - path: DepthStudioApp.swift
@@ -36,6 +37,7 @@ targets:
         product: FIT
     settings:
       base:
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         PRODUCT_BUNDLE_IDENTIFIER: com.bananaflow.depthstudio
         PRODUCT_NAME: "Depth Studio"
         IPHONEOS_DEPLOYMENT_TARGET: "17.0"

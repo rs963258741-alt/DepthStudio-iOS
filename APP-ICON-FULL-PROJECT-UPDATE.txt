@@ -1,0 +1,13 @@
+DepthStudio-iOS — Full project package with App Icon integrated
+
+This package is based on the previously supplied DepthStudio_Native_Phase1_BuildFix2.zip.
+It contains the full project tree, with these intended App Icon changes only:
+1. Added Assets.xcassets/AppIcon.appiconset/AppIcon.png
+2. Added Assets.xcassets/AppIcon.appiconset/Contents.json
+3. Added Assets.xcassets to the iOS target sources in project.yml
+4. Set ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon in the iOS target build settings
+
+No Swift source files, codemagic.yaml, index.html, fit-import.js, sw.js, or tests were changed from the base archive.
+
+IMPORTANT: Use this package only in the private DepthStudio-iOS repository, not the web DepthStudio repository.
+This is a complete project source snapshot, not an IPA and not a compiled app. Run the existing Codemagic workflow after committing the files.

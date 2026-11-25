@@ -2,10 +2,16 @@ Depth Studio Native APP Migration — Phase 1
 
 Validated in this environment:
 - swiftc -frontend -parse *.swift: PASS
-- GarminFITParser.swift type-shape check using local stubs matching published Garmin ObjcFIT/SwiftFIT declarations: PASS
+- FIT parser static API stub checks are not a substitute for importing the pinned Objective-C SDK into Xcode; the latest Codemagic compiler diagnostic was used to correct the Swift-imported selector name.
 - project.yml YAML parse and FIT package/source registration checks: PASS
 - node --test tests/fit-import.test.mjs: 9/9 PASS
 - Protected website and original APP core files compared against supplied archive: unchanged except ContentView.swift and project.yml which were intentionally modified.
+
+Codemagic build-log follow-up (2026-11-24):
+- First log: removed invalid optional chaining because the SDK's NSNumber return is imported as non-optional.
+- Second log: Xcode reported that the Objective-C selector `getValueForIndex:` is renamed by Swift import to `getValueFor(_:)`.
+- Current source uses `field.getValueFor(0).doubleValue` and checks the numeric result is finite before applying scale and offset.
+- Full Xcode build remains pending a new Codemagic run; syntax parsing alone does not prove the imported SDK call builds.
 
 Not run here:
 - xcodegen generate / xcodebuild (no Xcode or iOS SDK in this Linux environment)

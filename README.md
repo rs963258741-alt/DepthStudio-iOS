@@ -60,6 +60,6 @@ The Xcode project is generated from `project.yml` using XcodeGen. The existing `
 ### Native validation performed in this environment
 
 - Swift syntax parse: passed for all project `.swift` files.
-- FIT parser type-shape check against a local API stub matching Garmin's published Objective-C / SwiftFIT declarations: passed.
+- FIT parser static stub checks are limited and are not proof of the Objective-C SDK's Swift-imported API names. The latest Codemagic compiler diagnostic identified the required Swift name `getValueFor(_:)`, and the parser was updated accordingly.
 - `project.yml` YAML parsing and XcodeGen package/source declarations: passed.
 - iOS SDK / Xcode build and on-device FIT decoding: not run in this Linux environment; verify in Codemagic and on the target iPhone before proceeding to Phase 2.
