@@ -15,7 +15,8 @@ ARTIFACTS="$BUILD_DIR/test-artifacts"
 LOG="$BUILD_DIR/xcodebuild-test.log"
 mkdir -p "$ARTIFACTS"
 : > "$LOG"
-STARTED_AT="$(date +%s)"
+MARKER="$BUILD_DIR/.test-start"
+touch "$MARKER"
 xcodebuild -version
 
 if ! command -v xcodegen >/dev/null 2>&1; then
@@ -38,9 +39,12 @@ run_tests() {  # name, extra xcodebuild args...
   rm -rf "$bundle"
   echo "==== $name ====" | tee -a "$LOG"
   xcodebuild "$@" "${COMMON[@]}" -resultBundlePath "$bundle" 2>&1 \
-    | tee -a "$LOG" | grep --line-buffered -E "Test Case .*(passed|failed|skipped)|: error: |Restarting after|\[export-test\]|^\*\* [A-Z ]+ \*\*"
+    | tee -a "$LOG" | grep --line-buffered -E "Test Case .*(passed|failed|skipped)|: error: |Restarting after|\[export-test\]|\[ui-test\]|^\*\* [A-Z ]+ \*\*"
   local status=${PIPESTATUS[0]}
   xcrun xcresulttool get test-results tests --path "$bundle" > "$ARTIFACTS/$name-results.json" 2>/dev/null || true
+  # Screenshots and crash logs recorded in the result bundle.
+  xcrun xcresulttool export attachments --path "$bundle" --output-path "$ARTIFACTS/$name-attachments" >/dev/null 2>&1 || true
+  xcrun xcresulttool export diagnostics --path "$bundle" --output-path "$ARTIFACTS/$name-diagnostics" >/dev/null 2>&1 || true
   return "$status"
 }
 
@@ -65,8 +69,10 @@ if [[ "$BUILD_STATUS" -eq 0 ]]; then
 fi
 
 # Crash reports of the app or the test runners written during this run.
-find "$HOME/Library/Logs/DiagnosticReports" -name "*.ips" -newermt "@$STARTED_AT" 2>/dev/null \
+find "$HOME/Library/Logs/DiagnosticReports" -type f -newer "$MARKER" 2>/dev/null \
   | grep -E "Depth|xctest|Runner" | while read -r report; do cp "$report" "$ARTIFACTS/" ; done
+# Keep only the crash-related diagnostics (the full set is large).
+find "$ARTIFACTS" -path "*-diagnostics*" -type f ! -name "*.ips" ! -name "*.crash" ! -iname "*crash*" -delete 2>/dev/null || true
 
 {
   echo "build-for-testing: $BUILD_STATUS   unit tests: $UNIT_STATUS   UI tests: $UI_STATUS"

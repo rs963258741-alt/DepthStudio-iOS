@@ -47,5 +47,6 @@ workflows:
           bash scripts/ci_test.sh
     artifacts:
       - build/test-artifacts/*
+      - build/test-artifacts/**/*
       - build/test-summary.txt
       - build/xcodebuild-test.log

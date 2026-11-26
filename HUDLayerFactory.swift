@@ -102,8 +102,12 @@ enum HUDLayerFactory {
         layer.masksToBounds = false
     }
 
+    /// Switch for layer caching (tests compare exports with and without it).
+    nonisolated(unsafe) static var allowsRasterization = true
+
     /// Caches a layer that never changes, so it is not redrawn for every video frame.
     static func rasterize(_ layer: CALayer) {
+        guard allowsRasterization else { return }
         layer.shouldRasterize = true
         layer.rasterizationScale = 1
     }

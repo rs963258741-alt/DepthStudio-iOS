@@ -29,6 +29,27 @@ final class ExportPipelineTests: XCTestCase {
         }
     }
 
+    /// The video path alone (empty HUD layer), to tell simulator limits from HUD problems.
+    @MainActor
+    func testBareCompositionExportWithEmptyHUD() async throws {
+        let source = try await portraitSource()
+        print("[export-test] bare: exporting with an empty HUD")
+        let output = workDirectory.appendingPathComponent("bare.mp4")
+        let recorder = ExportRecorder()
+        let result = try await recorder.run { progress, completion in
+            DiveVideoExporter().exportVideo(videoURL: source, outputURL: output, aspect: .vertical916,
+                                            progress: progress, completion: completion,
+                                            makeHUD: { size, _ in
+                                                let layer = CALayer()
+                                                layer.frame = CGRect(origin: .zero, size: size)
+                                                return layer
+                                            })
+        }
+        print("[export-test] bare: finished")
+        let size = try await TestVideoFactory.videoSize(of: result)
+        XCTAssertEqual(size, CGSize(width: 2160, height: 3840))
+    }
+
     @MainActor
     func testDepthExportIs4KPortraitMatchesPreviewAndReportsProgress() async throws {
         let source = try await portraitSource()
@@ -81,6 +102,9 @@ final class ExportPipelineTests: XCTestCase {
             session.setTime(2.0, for: checkpoint.id)
         }
         let timeline = try PoolTimeline(session: session)
+        // Compared with the depth export (caching on): this one runs without layer caching.
+        HUDLayerFactory.allowsRasterization = false
+        defer { HUDLayerFactory.allowsRasterization = true }
         var settings = PoolHUDSettings()
         settings.visibility["totalDistance"] = true
         settings.visibility["averageSpeed"] = true

@@ -44,14 +44,28 @@ final class HUDLayoutUITests: XCTestCase {
         start.press(forDuration: 0.3, thenDragTo: start.withOffset(CGVector(dx: dx, dy: dy)))
     }
 
+    /// Drags each field and checks it moved; records every result (and a screenshot for
+    /// failures) instead of stopping at the first one.
     private func assertEveryFieldMoves(_ ids: [String], in app: XCUIApplication) {
+        continueAfterFailure = true
+        let stage = app.descendants(matching: .any)["previewStage"]
         for id in ids {
             let item = field(id, in: app)
             XCTAssertTrue(item.waitForExistence(timeout: 5), "\(id) exists")
+            let stageBefore = stage.frame
+            let frameBefore = item.frame
             let before = relativeCenter(of: item, in: app)
             drag(item, dx: 20, dy: -24)
             let after = relativeCenter(of: item, in: app)
-            XCTAssertGreaterThan(distance(before, after), 0.02, "\(id) should follow the drag (moved \(distance(before, after)))")
+            let moved = distance(before, after)
+            print("[ui-test] \(id): frame \(frameBefore) -> \(item.frame), stage \(stageBefore) -> \(stage.frame), moved \(moved)")
+            if moved <= 0.02 {
+                let shot = XCTAttachment(screenshot: app.screenshot())
+                shot.name = "drag-failed-\(id)"
+                shot.lifetime = .keepAlways
+                add(shot)
+            }
+            XCTAssertGreaterThan(moved, 0.02, "\(id) should follow the drag (moved \(moved))")
         }
     }
 
