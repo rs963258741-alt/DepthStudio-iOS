@@ -2,8 +2,11 @@
 #
 # The main pipeline is .github/workflows/ios-build.yml, which also publishes the
 # GitHub Release that AltStore installs from. This workflow is kept so the app
-# can still be built on Codemagic by starting it by hand in the Codemagic UI.
+# can still be built on Codemagic by starting it by hand in the Codemagic UI
+# (e.g. when GitHub's macOS runners are unavailable).
 # Both use scripts/ci_build.sh, so a fix there applies to both.
+# Build numbers are Codemagic's BUILD_NUMBER + 1000, so they never collide with
+# GitHub's (run number + 100) and always increase for AltStore.
 workflows:
   depth-studio-unsigned-ios:
     name: Depth Studio · unsigned IPA for AltStore
@@ -19,6 +22,7 @@ workflows:
       - name: Build and package IPA
         script: |
           set -euo pipefail
+          export APP_BUILD_NUMBER=$(( ${BUILD_NUMBER:-0} + 1000 ))
           bash scripts/ci_build.sh
     artifacts:
       - build/DepthStudio.ipa
