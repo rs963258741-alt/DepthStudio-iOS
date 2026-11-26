@@ -64,7 +64,7 @@ xcodebuild \
 BUILD_STATUS=${PIPESTATUS[0]}
 set -e -o pipefail
 
-WARNINGS=$(grep -E ': warning: ' "$LOG" | sort -u | wc -l | tr -d ' ')
+WARNINGS=$(awk '/: warning: / && !seen[$0]++ { count++ } END { print count + 0 }' "$LOG")
 echo "xcodebuild exit status: $BUILD_STATUS, unique warnings: $WARNINGS"
 
 if [[ "$BUILD_STATUS" -ne 0 ]]; then

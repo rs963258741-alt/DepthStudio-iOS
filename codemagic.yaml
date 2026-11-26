@@ -12,14 +12,18 @@ workflows:
     environment:
       xcode: latest
     scripts:
-      - name: Tests
+      - name: Record source and run tests
         script: |
           set -euo pipefail
+          git rev-parse HEAD
           python3 -m unittest discover -s tests -p 'test_*.py' -v
       - name: Build and package IPA
         script: |
           set -euo pipefail
-          bash scripts/ci_build.sh
+          APP_BUILD_NUMBER=105 bash scripts/ci_build.sh
+          shasum -a 256 build/DepthStudio.ipa > build/DepthStudio.ipa.sha256
     artifacts:
       - build/DepthStudio.ipa
+      - build/DepthStudio.ipa.sha256
+      - build/build-info.env
       - build/xcodebuild-release.log
