@@ -12,6 +12,7 @@
 ## 專案結構重點
 
 - 原生 SwiftUI App，Xcode 專案由 **XcodeGen** 依 `project.yml` 產生（repo 內沒有 `.xcodeproj`）。
+- 啟動流程：`DepthStudioRootView`（`ContentView.swift`）→ 啟動動畫 → `ModeSelectionView` 選模式 → 深度潛水 `ContentView` 或泳池平潛 `PoolModeView`。兩種模式各自獨立的介面。
 - `project.yml` 的 `sources:` 是**逐檔列出**。新增 Swift 檔／資源時必須同步加進去，否則不會被編譯。
 - 依賴：Garmin FIT Objective-C SDK（Swift Package，鎖定 revision）。
 - Bundle ID：`com.bananaflow.depthstudio`；最低 iOS 17；只支援 iPhone。
@@ -42,6 +43,7 @@ python3 -m py_compile scripts/*.py && bash -n scripts/ci_build.sh
 - 完整 xcodebuild log 存在 artifact；console 只印 error，失敗時最後會印 `BUILD FAILURE SUMMARY`。
 - Release tag：`v<MARKETING_VERSION>-build.<N>`，並標為 latest。
 - **Commit message 第一段（到第一個空行為止）會成為 Release 與 AltStore 顯示的更新說明**，請用繁體中文寫給使用者看的變更摘要；技術細節寫在後面的段落。
+- Commit message 含 `[no release]` 時只編譯檢查、不發佈 Release（用於未完成的中間版本，避免使用者收到不完整的更新）。
 - `codemagic.yaml` 呼叫同一支 `scripts/ci_build.sh`，是手動備援，不會自動觸發。
 
 ### 監看與修正（使用 GitHub MCP 工具）

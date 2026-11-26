@@ -74,7 +74,9 @@ jobs:
           retention-days: 14
 
       - name: Publish release for AltStore
-        if: success() && (github.event_name == 'push' || inputs.publish)
+        # A commit message containing [no release] is built and checked but not published,
+        # so work in progress can be compile-checked without an AltStore update.
+        if: success() && ((github.event_name == 'push' && !contains(github.event.head_commit.message, '[no release]')) || inputs.publish)
         env:
           GH_TOKEN: ${{ github.token }}
           NOTES_INPUT: ${{ inputs.notes }}

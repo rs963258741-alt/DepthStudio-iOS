@@ -5,7 +5,7 @@ import PhotosUI
 import CoreTransferable
 import Photos
 
-private enum DepthStudioColors {
+enum DepthStudioColors {
     static let background = Color(red: 0.025, green: 0.055, blue: 0.08)
     static let card = Color(red: 0.045, green: 0.085, blue: 0.105)
     static let cyan = Color(red: 0.24, green: 0.87, blue: 0.97)
@@ -30,7 +30,12 @@ private struct ImportedMovie: Transferable {
 
 private enum FileImportKind: Equatable { case diveLog, video }
 
+/// 深度潛水 mode (the original V8.18 screen).
 struct ContentView: View {
+    /// Returns to the mode picker. Nil when shown on its own (e.g. previews).
+    var onSwitchMode: (() -> Void)? = nil
+    @State private var confirmingModeSwitch = false
+
     @State private var hudSettings = HUDSettings.load()
     @State private var selectedHUDItem = "depthValue"
     @State private var isEditingLayout = true
@@ -38,7 +43,6 @@ struct ContentView: View {
     @State private var identityExpanded = false
     @State private var visibilityExpanded = false
 
-    @State private var showingLaunchAnimation = true
     @State private var showingFileImporter = false
     @State private var fileImportKind: FileImportKind?
     @State private var selectedPhotoVideo: PhotosPickerItem?
@@ -98,17 +102,16 @@ struct ContentView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(.clear)
-
-            if showingLaunchAnimation {
-                DepthStudioLaunchAnimation()
-                    .transition(.opacity)
-                    .zIndex(10)
-            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(DepthStudioColors.background.ignoresSafeArea())
         .preferredColorScheme(.dark)
-        .statusBarHidden(showingLaunchAnimation)
+        .confirmationDialog("切換潛水模式？", isPresented: $confirmingModeSwitch, titleVisibility: .visible) {
+            Button("回到模式選擇") { onSwitchMode?() }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("目前匯入的影片與潛水紀錄不會保留；HUD 外觀設定會保留。")
+        }
         .fileImporter(isPresented: $showingFileImporter,
                       allowedContentTypes: fileImportKind == .video ? videoContentTypes : diveLogContentTypes) { result in
             guard let kind = fileImportKind else { return }
@@ -126,10 +129,6 @@ struct ContentView: View {
         .onChange(of: hudSettings.displayName) { _, newValue in
             if newValue.count > 30 { hudSettings.displayName = String(newValue.prefix(30)) }
         }
-        .task {
-            try? await Task.sleep(nanoseconds: 2_700_000_000)
-            withAnimation(.easeInOut(duration: 0.55)) { showingLaunchAnimation = false }
-        }
     }
 
     private var header: some View {
@@ -143,6 +142,9 @@ struct ContentView: View {
                     .tracking(2.2).foregroundStyle(DepthStudioColors.cyan)
             }
             Spacer()
+            if onSwitchMode != nil {
+                ModeSwitchButton(title: "深度潛水") { confirmingModeSwitch = true }
+            }
             Image("JiaoliuLogo")
                 .resizable().scaledToFit()
                 .frame(width: 54, height: 46)
@@ -722,6 +724,48 @@ private enum VideoImportError: LocalizedError {
     case transferUnavailable
     var errorDescription: String? {
         "照片 App 沒有提供可讀取的影片檔案，請重新選擇或使用檔案 App 匯入。"
+    }
+}
+
+/// App root: launch animation → choose 深度潛水 or 泳池平潛 → that mode's screen.
+struct DepthStudioRootView: View {
+    @State private var showingLaunchAnimation = true
+    @State private var mode: DiveMode?
+
+    var body: some View {
+        ZStack {
+            DepthStudioColors.background.ignoresSafeArea()
+
+            switch mode {
+            case .depth:
+                ContentView(onSwitchMode: { switchMode(to: nil) })
+                    .transition(.opacity)
+            case .pool:
+                PoolModeView(onSwitchMode: { switchMode(to: nil) })
+                    .transition(.opacity)
+            case nil:
+                ModeSelectionView { switchMode(to: $0) }
+                    .transition(.opacity)
+            }
+
+            if showingLaunchAnimation {
+                DepthStudioLaunchAnimation()
+                    .transition(.opacity)
+                    .zIndex(10)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(DepthStudioColors.background.ignoresSafeArea())
+        .preferredColorScheme(.dark)
+        .statusBarHidden(showingLaunchAnimation)
+        .task {
+            try? await Task.sleep(nanoseconds: 2_700_000_000)
+            withAnimation(.easeInOut(duration: 0.55)) { showingLaunchAnimation = false }
+        }
+    }
+
+    private func switchMode(to newMode: DiveMode?) {
+        withAnimation(.easeInOut(duration: 0.3)) { mode = newMode }
     }
 }
 

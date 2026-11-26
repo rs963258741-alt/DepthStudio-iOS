@@ -27,6 +27,8 @@ targets:
       - path: LaunchScreen.storyboard
       - path: AtmosUDDFParser.swift
       - path: ContentView.swift
+      - path: ModeSelectionView.swift
+      - path: PoolModeView.swift
       - path: DepthStudioApp.swift
       - path: HUDSettings.swift
       - path: DiveDataInterpolator.swift

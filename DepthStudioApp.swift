@@ -4,7 +4,7 @@ import SwiftUI
 struct DepthStudioApp: App {
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            DepthStudioRootView()
                 .preferredColorScheme(.dark)
         }
     }
