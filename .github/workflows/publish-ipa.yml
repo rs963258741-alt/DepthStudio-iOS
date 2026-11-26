@@ -8,6 +8,12 @@ name: Publish external IPA → AltStore
 # and the release notes shown in AltStore.
 
 on:
+  # A push of this file only registers the workflow with GitHub (a workflow that is
+  # not on the default branch cannot be dispatched until it has run once); the job
+  # itself runs only for workflow_dispatch.
+  push:
+    branches: ["claude/**"]
+    paths: [".github/workflows/publish-ipa.yml"]
   workflow_dispatch:
     inputs:
       ipa_url:
@@ -27,6 +33,7 @@ permissions:
 jobs:
   publish:
     name: Publish IPA (Linux)
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
