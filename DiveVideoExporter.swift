@@ -49,6 +49,7 @@ enum DiveExportError: LocalizedError {
 /// transforms, visibility, identity, global style and sync offset are rendered
 /// into the final MP4 using Core Animation.
 final class DiveVideoExporter {
+    /// 深度潛水 export: the depth HUD over the source video.
     func export(
         videoURL: URL,
         samples: [DiveSample],
@@ -59,6 +60,36 @@ final class DiveVideoExporter {
         progress: ((Double) -> Void)? = nil,
         completion: @escaping (Result<URL, Error>) -> Void
     ) {
+        let sorted = samples.sorted { $0.elapsedSeconds < $1.elapsedSeconds }
+        guard sorted.count >= 2,
+              zip(sorted, sorted.dropFirst()).allSatisfy({ $0.elapsedSeconds < $1.elapsedSeconds }) else {
+            completion(.failure(DiveExportError.invalidSamples))
+            return
+        }
+        exportVideo(
+            videoURL: videoURL,
+            outputURL: outputURL,
+            outputFileType: settings.outputFileType,
+            progress: progress,
+            completion: completion,
+            makeHUD: { renderSize, videoDuration in
+                self.makeHUDLayer(size: renderSize, samples: sorted, maximumDepth: maximumDepth,
+                                  videoDuration: videoDuration, sync: sync, settings: settings)
+            }
+        )
+    }
+
+    /// Shared export path for every mode: renders the source video at a long edge of at
+    /// least 3840 px, composites the HUD layer from `makeHUD(renderSize, videoDuration)`,
+    /// keeps the audio and validates the resulting MP4.
+    func exportVideo(
+        videoURL: URL,
+        outputURL: URL,
+        outputFileType: AVFileType = .mp4,
+        progress: ((Double) -> Void)? = nil,
+        completion: @escaping (Result<URL, Error>) -> Void,
+        makeHUD: @escaping (CGSize, Double) -> CALayer
+    ) {
         let asset = AVURLAsset(url: videoURL)
         Task {
             do {
@@ -67,12 +98,6 @@ final class DiveVideoExporter {
                 let audioTracks = try await asset.loadTracks(withMediaType: .audio)
                 let duration = try await asset.load(.duration)
                 guard duration.seconds.isFinite, duration.seconds > 0 else { throw DiveExportError.invalidDuration }
-
-                let sorted = samples.sorted { $0.elapsedSeconds < $1.elapsedSeconds }
-                guard sorted.count >= 2,
-                      zip(sorted, sorted.dropFirst()).allSatisfy({ $0.elapsedSeconds < $1.elapsedSeconds }) else {
-                    throw DiveExportError.invalidSamples
-                }
 
                 let naturalSize = try await sourceVideoTrack.load(.naturalSize)
                 let preferredTransform = try await sourceVideoTrack.load(.preferredTransform)
@@ -96,21 +121,17 @@ final class DiveVideoExporter {
                     preferredTransform: preferredTransform,
                     sourceFrameDuration: sourceFrameDuration,
                     renderSize: renderSize,
-                    samples: sorted,
-                    maximumDepth: maximumDepth,
-                    videoDuration: duration.seconds,
-                    sync: sync,
-                    settings: settings
+                    hud: makeHUD(renderSize, duration.seconds)
                 )
 
                 try? FileManager.default.removeItem(at: outputURL)
                 guard let session = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetHighestQuality) else {
                     throw DiveExportError.cannotCreateExportSession
                 }
-                guard session.supportedFileTypes.contains(settings.outputFileType) else { throw DiveExportError.unsupportedOutputType }
+                guard session.supportedFileTypes.contains(outputFileType) else { throw DiveExportError.unsupportedOutputType }
                 session.videoComposition = composition
                 session.outputURL = outputURL
-                session.outputFileType = settings.outputFileType
+                session.outputFileType = outputFileType
                 session.shouldOptimizeForNetworkUse = true
 
                 let progressTask = Task.detached(priority: .utility) {
@@ -160,11 +181,7 @@ final class DiveVideoExporter {
         preferredTransform: CGAffineTransform,
         sourceFrameDuration: CMTime,
         renderSize: CGSize,
-        samples: [DiveSample],
-        maximumDepth: Double,
-        videoDuration: Double,
-        sync: TimelineSync,
-        settings: DiveExportSettings
+        hud: CALayer
     ) async throws -> AVMutableVideoComposition {
         let transformedRect = CGRect(origin: .zero, size: naturalSize).applying(preferredTransform)
         let normalizedTransform = preferredTransform.concatenating(
@@ -194,8 +211,6 @@ final class DiveVideoExporter {
         videoLayer.frame = parent.bounds
         parent.addSublayer(videoLayer)
 
-        let hud = makeHUDLayer(size: renderSize, samples: samples, maximumDepth: maximumDepth,
-                               videoDuration: videoDuration, sync: sync, settings: settings)
         parent.addSublayer(hud)
         composition.animationTool = AVVideoCompositionCoreAnimationTool(
             postProcessingAsVideoLayer: videoLayer,
@@ -354,7 +369,7 @@ final class DiveVideoExporter {
         container.addSublayer(typeLayer)
     }
 
-    private func makeTextLayer(text: String, frame: CGRect, fontSize: CGFloat, weight: UIFont.Weight,
+    func makeTextLayer(text: String, frame: CGRect, fontSize: CGFloat, weight: UIFont.Weight,
                                color: UIColor, tracking: CGFloat = 0) -> CATextLayer {
         let layer = CATextLayer()
         layer.string = text

@@ -13,7 +13,8 @@ enum DepthStudioColors {
 }
 
 /// PhotosPicker's temporary movie URL is copied while the transfer remains valid.
-private struct ImportedMovie: Transferable {
+/// Shared by the depth and pool screens.
+struct ImportedMovie: Transferable {
     let url: URL
     static var transferRepresentation: some TransferRepresentation {
         FileRepresentation(importedContentType: .movie) { received in

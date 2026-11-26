@@ -16,6 +16,13 @@ https://github.com/rs963258741-alt/DepthStudio-iOS/releases/latest/download/alts
 
 開發流程細節（版本號、CI、除錯方式）見 [`CLAUDE.md`](CLAUDE.md)。Codemagic（`codemagic.yaml`）保留為手動備援，與 GitHub Actions 共用 `scripts/ci_build.sh`。
 
+## 兩種模式
+
+開啟 App 後先選擇模式：
+
+- **深度潛水**：匯入 Garmin FIT／ATMOS UDDF，疊加深度、時間、水溫與下潛曲線（V8.18 功能對齊）。
+- **泳池平潛**（V1 基礎模式）：不需要潛水錶。設定泳池長度（25／50 m）與最終出水距離，在影片上標記出發、每次轉身與出水時間；App 計算累積距離、閉氣時間、趟次與分段平均速率，HUD 顯示距離／速率雙曲線，並以同一套 4K MP4 引擎輸出。AI 影像追蹤的浮動速率為下一階段。
+
 這個 Repository 是獨立的原生 iOS App 專案。網頁版原始專案不在這裡修改；本專案以使用者提供的 `DepthStudio_WebPreview_V8_18.zip` 作為功能比對基準。
 
 ## 版本
