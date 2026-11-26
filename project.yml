@@ -77,6 +77,9 @@ targets:
       base:
         GENERATE_INFOPLIST_FILE: YES
         PRODUCT_BUNDLE_IDENTIFIER: com.bananaflow.depthstudio.tests
+        # The app's product name has a space, so the default TEST_HOST (target name) is wrong.
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Depth Studio.app/Depth Studio"
+        BUNDLE_LOADER: "$(TEST_HOST)"
         IPHONEOS_DEPLOYMENT_TARGET: "17.0"
         TARGETED_DEVICE_FAMILY: "1"
 
