@@ -19,7 +19,8 @@ class DraggingTests(unittest.TestCase):
         for hud in (DEPTH_HUD, POOL_HUD):
             item = hud[hud.index("hudItem(definition.id"):]
             item = item[:item.index(".position(") + 10]
-            self.assertIn(".gesture(dragGesture(", item)
+            self.assertIn(".highPriorityGesture(dragGesture(", item)
+            self.assertNotIn("onTapGesture", item, "a separate tap gesture swallowed short drags")
             self.assertIn(".contentShape(Rectangle())", item)
             self.assertIn(".allowsHitTesting(isEditing)", item)
             self.assertIn('accessibilityIdentifier("hud.\\(definition.id)")', item)

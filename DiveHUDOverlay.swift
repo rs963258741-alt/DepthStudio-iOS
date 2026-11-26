@@ -46,8 +46,7 @@ struct DiveHUDOverlay: View {
                             .scaleEffect(settings.fontScale * transform.scale)
                             .rotationEffect(.degrees(transform.rotation))
                             .opacity(settings.opacity)
-                            .onTapGesture { if isEditing { selectedItem = definition.id } }
-                            .gesture(dragGesture(id: definition.id, size: size))
+                            .highPriorityGesture(dragGesture(id: definition.id, size: size))
                             .allowsHitTesting(isEditing)
                             .accessibilityElement(children: .ignore)
                             .accessibilityLabel(definition.title)
@@ -150,11 +149,13 @@ struct DiveHUDOverlay: View {
             .tracking(1.1).foregroundStyle(muted).shadow(color: cyan.opacity(0.45), radius: 4).fixedSize()
     }
 
-    /// Drag in screen coordinates, so scaled or rotated items still follow the finger.
-    /// The end event applies the final translation too: a quick flick can arrive as a
-    /// single end event without any change events.
+    /// One gesture for select and move: touching an item selects it, moving it drags it.
+    /// (A separate tap gesture competed with the drag, so short drags were taken as taps.)
+    /// High priority so it wins over the page's scrolling; screen coordinates so scaled or
+    /// rotated items follow the finger; the end event applies the final translation too,
+    /// because a quick flick can arrive as a single end event.
     private func dragGesture(id: String, size: CGSize) -> some Gesture {
-        DragGesture(minimumDistance: 2, coordinateSpace: .global)
+        DragGesture(minimumDistance: 0, coordinateSpace: .global)
             .onChanged { value in moveItem(id, by: value.translation, size: size) }
             .onEnded { value in
                 moveItem(id, by: value.translation, size: size)
@@ -165,6 +166,8 @@ struct DiveHUDOverlay: View {
     private func moveItem(_ id: String, by translation: CGSize, size: CGSize) {
         guard isEditing, size.width > 0, size.height > 0 else { return }
         selectedItem = id
+        // A touch without movement only selects (no snapping jump).
+        guard abs(translation.width) >= 0.5 || abs(translation.height) >= 0.5 else { return }
         if dragOrigins[id] == nil {
             dragOrigins[id] = settings.positions[id] ?? HUDPoint(x: 50, y: 50)
         }

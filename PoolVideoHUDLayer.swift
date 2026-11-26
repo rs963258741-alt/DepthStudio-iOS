@@ -150,13 +150,7 @@ struct PoolHUDLayerBuilder {
         var times: [Double] = [0]
         let start = max(0, timeline.startTime)
         let end = min(videoDuration, timeline.finishTime)
-        if end > start {
-            var t = start
-            while t < end {
-                times.append(t)
-                t += PoolTimeline.stepDuration
-            }
-        }
+        times += DiveVideoExporter.sampleTimes(from: start, to: end, step: PoolTimeline.stepDuration)
         for point in timeline.points where point.time >= 0 && point.time <= videoDuration {
             times.append(point.time)
         }

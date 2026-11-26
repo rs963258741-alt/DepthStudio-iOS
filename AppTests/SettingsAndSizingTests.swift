@@ -42,6 +42,16 @@ final class ExportSizingTests: XCTestCase {
         XCTAssertEqual(DiveVideoExporter.outputFrameDuration(source: .invalid), CMTime(value: 1, timescale: 30))
     }
 
+    func testSampleTimesHaveNoRoundingDrift() {
+        let times = DiveVideoExporter.sampleTimes(from: 0, to: 4, step: 0.1)
+        XCTAssertEqual(times.first, 0)
+        XCTAssertEqual(times.last, 4)
+        XCTAssertTrue(times.contains(2.0), "2.0 s must be a sample, not 1.9999… or 2.0000…4")
+        XCTAssertEqual(times.count, 41)
+        XCTAssertEqual(zip(times, times.dropFirst()).filter { $1 <= $0 }.count, 0)
+        XCTAssertTrue(DiveVideoExporter.sampleTimes(from: 2, to: 2, step: 0.1).isEmpty)
+    }
+
     func testExportProgressShowsTimeRemaining() {
         let now = Date()
         let clock = ExportProgressClock(startedAt: now.addingTimeInterval(-10))

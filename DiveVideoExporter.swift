@@ -265,15 +265,7 @@ final class DiveVideoExporter {
         // The recorded dive in video time; live values only show inside it (as in the preview).
         let diveStart = max(0, videoTime(forWatchTime: samples[0].elapsedSeconds, sync: sync))
         let diveEnd = min(videoDuration, videoTime(forWatchTime: samples[samples.count - 1].elapsedSeconds, sync: sync))
-        var liveTimes: [Double] = []
-        if diveEnd > diveStart {
-            var t = diveStart
-            while t < diveEnd {
-                liveTimes.append(t)
-                t += 0.1
-            }
-            liveTimes.append(diveEnd)
-        }
+        let liveTimes = Self.sampleTimes(from: diveStart, to: diveEnd, step: 0.1)
         func reading(at videoTime: Double) -> DiveReading? {
             interpolator?.reading(at: sync.watchTime(forVideoTime: videoTime))
         }
@@ -427,13 +419,7 @@ final class DiveVideoExporter {
         let diveStart = max(0, videoTime(forWatchTime: chart.first, sync: sync))
         let diveEnd = min(videoDuration, videoTime(forWatchTime: chart.last, sync: sync))
         guard diveEnd > diveStart, let interpolator else { return layer }
-        var times: [Double] = []
-        var t = diveStart
-        while t < diveEnd {
-            times.append(t)
-            t += 0.1
-        }
-        times.append(diveEnd)
+        let times = Self.sampleTimes(from: diveStart, to: diveEnd, step: 0.1)
 
         let guide = HUDLayerFactory.line([CGPoint(x: 0, y: 0), CGPoint(x: 0, y: plot.height)],
                                          color: HUDLayerFactory.chartCyan.withAlphaComponent(0.75),
@@ -455,6 +441,15 @@ final class DiveVideoExporter {
         }
         HUDLayerFactory.addVisibility(to: marker, start: diveStart, end: diveEnd, duration: videoDuration, key: "depth-marker-visibility")
         return layer
+    }
+
+    /// start, start + step, … (computed by multiplication, so no rounding drift), then end.
+    static func sampleTimes(from start: Double, to end: Double, step: Double) -> [Double] {
+        guard end > start, step > 0 else { return [] }
+        let count = Int(((end - start) / step).rounded(.up))
+        var times = (0..<count).map { start + Double($0) * step }.filter { $0 < end }
+        times.append(end)
+        return times
     }
 
     /// Inverse of TimelineSync.watchTime(forVideoTime:).
