@@ -1,8 +1,8 @@
 # Codemagic (optional) — builds the same unsigned IPA as GitHub Actions.
 #
 # The main pipeline is .github/workflows/ios-build.yml, which also publishes the
-# GitHub Release that AltStore installs from. This workflow is kept so the app
-# can still be built on Codemagic by starting it by hand in the Codemagic UI.
+# GitHub Release that AltStore installs from. This workflow is kept so app
+# builds are also available in Codemagic and run automatically on test-branch pushes.
 # Both use scripts/ci_build.sh, so a fix there applies to both.
 workflows:
   depth-studio-unsigned-ios:
@@ -11,6 +11,12 @@ workflows:
     instance_type: mac_mini_m2
     environment:
       xcode: latest
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: 'ios/dev-*'
+          include: true
     scripts:
       - name: Record source and run tests
         script: |
