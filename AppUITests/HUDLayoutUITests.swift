@@ -39,6 +39,27 @@ final class HUDLayoutUITests: XCTestCase {
 
     private func distance(_ a: CGPoint, _ b: CGPoint) -> CGFloat { hypot(a.x - b.x, a.y - b.y) }
 
+    /// Scrolls the page until the element is on screen. The preview is taller than the
+    /// space below the header, so its lower fields start off screen. Scrolls by dragging
+    /// the left margin, outside the preview, and holds at the end so it does not coast.
+    private func bringIntoView(_ element: XCUIElement, in app: XCUIApplication) {
+        let window = app.windows.firstMatch.frame
+        let topY = window.minY + 140
+        let bottomY = window.maxY - 140
+        for _ in 0..<5 {
+            let midY = element.frame.midY
+            if midY >= topY && midY <= bottomY { return }
+            let needed = midY - window.midY   // > 0: content has to move up
+            let distance = min(abs(needed), bottomY - topY)
+            let fromY = needed > 0 ? bottomY : topY
+            let toY = needed > 0 ? bottomY - distance : topY + distance
+            let origin = app.coordinate(withNormalizedOffset: .zero)
+            origin.withOffset(CGVector(dx: 8, dy: fromY))
+                .press(forDuration: 0.05, thenDragTo: origin.withOffset(CGVector(dx: 8, dy: toY)),
+                       withVelocity: .slow, thenHoldForDuration: 0.3)
+        }
+    }
+
     private func drag(_ element: XCUIElement, dx: CGFloat, dy: CGFloat) {
         let start = element.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         start.press(forDuration: 0.3, thenDragTo: start.withOffset(CGVector(dx: dx, dy: dy)),
@@ -53,6 +74,7 @@ final class HUDLayoutUITests: XCTestCase {
         for id in ids {
             let item = field(id, in: app)
             XCTAssertTrue(item.waitForExistence(timeout: 5), "\(id) exists")
+            bringIntoView(item, in: app)
             let stageBefore = stage.frame
             let frameBefore = item.frame
             let before = relativeCenter(of: item, in: app)
