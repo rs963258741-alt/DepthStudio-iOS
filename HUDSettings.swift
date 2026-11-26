@@ -31,6 +31,10 @@ struct HUDItemDefinition: Identifiable, Hashable {
         .init(id: "footerBrand", title: "裝置名稱"),
         .init(id: "maxDepth", title: "最大深度")
     ]
+
+    /// Items shown only while the recorded dive covers the current video time.
+    static let liveIDs: Set<String> = ["hudClock", "depthValue", "depthUnit", "elapsedValue", "elapsedLabel",
+                                       "tempValue", "tempLabel", "speedValue", "speedLabel"]
 }
 
 struct HUDCountryOption: Identifiable, Hashable {
@@ -136,10 +140,35 @@ struct HUDSettings: Codable, Equatable {
         return result
     }
 
-    mutating func resetLayout() {
-        let defaults = HUDSettings()
-        positions = defaults.positions
-        transforms = defaults.transforms
+    /// Key of the user's own default layout (「將目前排版設為預設」).
+    static let customDefaultLayoutKey = "depthstudio.native.hud-default-layout.v1"
+
+    /// The user's saved default layout, if they have set one.
+    static func customDefaultLayout(in store: UserDefaults = .standard) -> HUDLayoutPreset? {
+        HUDLayoutPresetStore.load(key: customDefaultLayoutKey, from: store)
+    }
+
+    /// Saves the current positions and per-item size/rotation as the default that
+    /// 「恢復預設位置」 restores, including after the app restarts.
+    func saveLayoutAsDefault(in store: UserDefaults = .standard) {
+        HUDLayoutPresetStore.save(HUDLayoutPreset(positions: positions, transforms: transforms),
+                                  key: Self.customDefaultLayoutKey, to: store)
+    }
+
+    static func clearCustomDefaultLayout(in store: UserDefaults = .standard) {
+        HUDLayoutPresetStore.clear(key: customDefaultLayoutKey, in: store)
+    }
+
+    /// Restores the user's default layout if one is saved, otherwise the built-in layout.
+    mutating func resetLayout(using store: UserDefaults = .standard) {
+        let builtIn = HUDSettings()
+        if let preset = Self.customDefaultLayout(in: store) {
+            positions = builtIn.positions.merging(preset.positions) { _, custom in custom }
+            transforms = builtIn.transforms.merging(preset.transforms) { _, custom in custom }
+        } else {
+            positions = builtIn.positions
+            transforms = builtIn.transforms
+        }
     }
 
     mutating func setAllVisible(_ visible: Bool) {

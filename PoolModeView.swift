@@ -24,8 +24,18 @@ struct PoolModeView: View {
     @State private var showingFileImporter = false
     @State private var isImportingVideo = false
     @State private var videoURL: URL?
-    @State private var player: AVPlayer?
-    @State private var currentVideoTime: Double = 0
+    /// Not observed here on purpose: only the views that show the playback time read it.
+    @State private var playback = PlaybackController()
+    @State private var outputAspect: OutputAspect = .original
+    @State private var showingFloatingPreview = false
+    @State private var confirmingSaveDefaultLayout = false
+    @State private var hasCustomDefaultLayout = PoolHUDSettings.customDefaultLayout() != nil
+
+    @State private var motionSignal: PoolMotionSignal?
+    @State private var isAnalyzing = false
+    @State private var analysisProgress = 0.0
+    @State private var analysisTask: Task<Void, Never>?
+    @State private var analysisMessage: String?
 
     @State private var finalDistanceDraft: Double = 150
     @State private var checkpointDistanceDraft: Double = 25
@@ -36,14 +46,21 @@ struct PoolModeView: View {
     @State private var isExporting = false
     @State private var exportProgress = 0.0
     @State private var exportedVideoURL: URL?
-    @State private var exportInfo = "輸出影片至少 4K（長邊 3840 px）；完成後可直接儲存到 iPhone 照片。"
+    @State private var exportClock = ExportProgressClock()
+    @State private var exportInfo = "輸出 4K 等級 MP4（9:16 為 2160 × 3840）；完成後可直接儲存到 iPhone 照片。"
     @State private var statusMessage = "已載入示範數據（50 m 泳池、150 m）。匯入平潛影片後，依序標記出發、轉身與出水時間。"
     @State private var errorMessage: String?
 
-    private var timelineResult: Result<PoolTimeline, Error> { Result { try PoolTimeline(session: session) } }
+    private var timelineResult: Result<PoolTimeline, Error> {
+        Result { try PoolTimeline(session: session, motion: motionSignal) }
+    }
     private var timeline: PoolTimeline? { try? timelineResult.get() }
     private var canExport: Bool { videoURL != nil && timeline != nil && !isExporting }
     private var videoContentTypes: [UTType] { [.movie, .mpeg4Movie, .quickTimeMovie] }
+    /// Width ÷ height of the preview stage and of the export.
+    private var stageRatio: CGFloat {
+        playback.hasVideo ? outputAspect.ratio(source: playback.videoAspect) : 9.0 / 16.0
+    }
 
     var body: some View {
         NavigationStack {
@@ -75,9 +92,25 @@ struct PoolModeView: View {
             }
             .background(DepthStudioColors.background.ignoresSafeArea())
         }
+        .overlay(alignment: .topTrailing) {
+            if showingFloatingPreview {
+                FloatingPreviewPanel(aspect: stageRatio, onClose: { showingFloatingPreview = false }) {
+                    PoolFloatingPreview(playback: playback, timeline: timeline, settings: hudSettings)
+                }
+                .padding(.top, 8)
+                .padding(.trailing, 12)
+                .transition(.opacity)
+            }
+        }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(DepthStudioColors.background.ignoresSafeArea())
         .preferredColorScheme(.dark)
+        .confirmationDialog("將目前排版設為預設？", isPresented: $confirmingSaveDefaultLayout, titleVisibility: .visible) {
+            Button("設為預設") { saveCurrentLayoutAsDefault() }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("之後按「恢復預設位置」會回到目前的排版，重新啟動 App 也一樣。")
+        }
         .confirmationDialog("切換潛水模式？", isPresented: $confirmingModeSwitch, titleVisibility: .visible) {
             Button("回到模式選擇") { onSwitchMode?() }
             Button("取消", role: .cancel) {}
@@ -107,7 +140,10 @@ struct PoolModeView: View {
         .onChange(of: session.finalDistance) { _, newValue in
             if finalDistanceDraft != newValue { finalDistanceDraft = newValue }
         }
-        .onDisappear { player?.pause() }
+        .onDisappear {
+            analysisTask?.cancel()
+            playback.unload()
+        }
     }
 
     // MARK: Sections
@@ -177,30 +213,28 @@ struct PoolModeView: View {
 
     private var previewSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                sectionTitle("影像與 HUD 預覽", subtitle: "點選 HUD 項目後可拖曳、縮放及旋轉。")
-                Spacer(minLength: 6)
-                Button {
-                    isEditingLayout.toggle()
-                } label: {
-                    Text(isEditingLayout ? "排版：開" : "排版：關")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(isEditingLayout ? .black : DepthStudioColors.cyan)
-                        .padding(.horizontal, 10).padding(.vertical, 7)
-                        .background(isEditingLayout ? DepthStudioColors.cyan : DepthStudioColors.background, in: Capsule())
-                }
-                .buttonStyle(.plain)
-            }
+            sectionTitle("影像與 HUD 預覽", subtitle: "排版開啟時可直接拖曳任一 HUD 欄位；點選後可在 03 調整大小與旋轉。")
+            layoutButtons
 
-            if let player {
-                PoolVideoPreview(
-                    player: player,
+            if playback.hasVideo {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("輸出版型").font(.caption.weight(.semibold)).foregroundStyle(DepthStudioColors.muted)
+                    OutputAspectPicker(selection: $outputAspect)
+                }
+                PoolStageView(
+                    playback: playback,
                     timeline: timeline,
                     settings: $hudSettings,
                     selectedHUDItem: $selectedHUDItem,
-                    isEditing: isEditingLayout,
-                    onTimeChange: { currentVideoTime = $0 }
+                    isEditing: isEditingLayout
                 )
+                .aspectRatio(stageRatio, contentMode: .fit)
+                .frame(maxWidth: .infinity)
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 16).stroke(DepthStudioColors.cyan.opacity(0.25), lineWidth: 1))
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("previewStage")
+                PlaybackControls(playback: playback)
             } else {
                 GeometryReader { proxy in
                     ZStack {
@@ -230,6 +264,8 @@ struct PoolModeView: View {
                     .overlay(RoundedRectangle(cornerRadius: 16).stroke(DepthStudioColors.cyan.opacity(0.25), lineWidth: 1))
                 }
                 .aspectRatio(9.0 / 16.0, contentMode: .fit)
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("previewStage")
             }
         }
         .padding(14)
@@ -238,8 +274,8 @@ struct PoolModeView: View {
 
     private var timelineSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            sectionTitle("02 / 泳池設定與時間節點",
-                         subtitle: "播放影片到出發、每次轉身及出水的瞬間，按「標記」記下影片時間。")
+            sectionHeader("02 / 泳池設定與時間節點",
+                          subtitle: "播放影片到出發、每次轉身及出水的瞬間，按「標記」記下影片時間。")
 
             HStack {
                 Text("泳池長度").font(.caption.weight(.semibold)).foregroundStyle(DepthStudioColors.muted)
@@ -282,9 +318,7 @@ struct PoolModeView: View {
                 Label("目前影片時間", systemImage: "play.circle")
                     .font(.caption.weight(.semibold)).foregroundStyle(DepthStudioColors.muted)
                 Spacer()
-                Text(player == nil ? "尚未匯入影片" : PoolFormat.preciseClock(currentVideoTime))
-                    .font(.system(.footnote, design: .monospaced).weight(.bold))
-                    .foregroundStyle(player == nil ? DepthStudioColors.muted : DepthStudioColors.cyan)
+                PlaybackTimeLabel(playback: playback)
             }
 
             VStack(spacing: 8) {
@@ -301,6 +335,8 @@ struct PoolModeView: View {
                 Button("新增") { addCheckpoint() }
                     .buttonStyle(.bordered).tint(DepthStudioColors.cyan)
             }
+
+            aiAnalysisCard
 
             switch timelineResult {
             case .success(let timeline):
@@ -336,18 +372,18 @@ struct PoolModeView: View {
                     .overlay(Capsule().stroke(DepthStudioColors.cyan.opacity(0.35), lineWidth: 1))
             }
             .buttonStyle(.plain)
-            .disabled(node.videoTime == nil || player == nil)
+            .disabled(node.videoTime == nil || !playback.hasVideo)
             .accessibilityLabel("跳到 \(PoolFormat.distance(node.distance)) 公尺的時間")
 
-            Button { session.setTime(currentVideoTime, for: node.id) } label: {
+            Button { session.setTime(playback.currentTime, for: node.id) } label: {
                 Text("標記")
                     .font(.caption.weight(.bold))
-                    .foregroundStyle(player == nil ? DepthStudioColors.muted : .black)
+                    .foregroundStyle(playback.hasVideo ? .black : DepthStudioColors.muted)
                     .padding(.horizontal, 10).padding(.vertical, 6)
-                    .background(player == nil ? Color.gray.opacity(0.3) : DepthStudioColors.cyan, in: Capsule())
+                    .background(playback.hasVideo ? DepthStudioColors.cyan : Color.gray.opacity(0.3), in: Capsule())
             }
             .buttonStyle(.plain)
-            .disabled(player == nil)
+            .disabled(!playback.hasVideo)
             .accessibilityLabel("以目前影片時間標記 \(PoolFormat.distance(node.distance)) 公尺")
 
             Menu {
@@ -393,7 +429,7 @@ struct PoolModeView: View {
                     .font(.caption.monospacedDigit())
                 }
             }
-            Text("基礎模式：節點之間以等速計算距離，速率為各段平均速率。AI 影像追蹤的浮動速率將在下一階段加入。")
+            Text(speedSourceText(timeline))
                 .font(.caption2).foregroundStyle(.secondary)
         }
         .padding(11)
@@ -404,6 +440,15 @@ struct PoolModeView: View {
     private var hudAppearanceSection: some View {
         DisclosureGroup(isExpanded: $editorExpanded) {
             VStack(alignment: .leading, spacing: 12) {
+                Toggle(isOn: $isEditingLayout) {
+                    Label("開啟任意排版", systemImage: "hand.draw")
+                        .font(.subheadline.weight(.semibold))
+                }
+                .tint(DepthStudioColors.cyan)
+                .accessibilityIdentifier("layout.freeToggle")
+                Text("與預覽區的「排版」按鈕同步；開啟後所有 HUD 欄位都可以直接拖曳。")
+                    .font(.caption2).foregroundStyle(.secondary)
+
                 Picker("目前編輯項目", selection: $selectedHUDItem) {
                     ForEach(PoolHUDItemDefinition.all) { item in Text(item.title).tag(item.id) }
                 }
@@ -436,17 +481,31 @@ struct PoolModeView: View {
                         let name = hudSettings.displayName
                         let country = hudSettings.country
                         hudSettings = PoolHUDSettings()
+                        hudSettings.resetLayout()
                         hudSettings.displayName = name
                         hudSettings.country = country
                     }
                     .buttonStyle(.bordered).tint(DepthStudioColors.muted)
+                }
+                HStack(spacing: 8) {
+                    Text(hasCustomDefaultLayout ? "目前預設：你設定的排版" : "目前預設：原廠排版")
+                        .font(.caption2).foregroundStyle(DepthStudioColors.muted)
+                    if hasCustomDefaultLayout {
+                        Button("改回原廠預設") {
+                            PoolHUDSettings.clearCustomDefaultLayout()
+                            hasCustomDefaultLayout = false
+                            statusMessage = "已清除自訂預設；「恢復預設位置」會回到原廠排版。"
+                        }
+                        .font(.caption2)
+                        .buttonStyle(.bordered).tint(DepthStudioColors.muted)
+                    }
                 }
                 Text("排版模式開啟時，直接拖曳預覽中的任一 HUD 欄位；位置依畫面比例儲存，項目中心會吸附對齊其他可見欄位。")
                     .font(.caption2).foregroundStyle(.secondary)
             }
             .padding(.top, 10)
         } label: {
-            sectionTitle("03 / HUD 外觀與自由排版", subtitle: "每個欄位可獨立移動、縮放與旋轉。")
+            sectionHeader("03 / HUD 外觀與自由排版", subtitle: "每個欄位可獨立移動、縮放與旋轉。")
         }
         .tint(DepthStudioColors.cyan)
         .padding(14)
@@ -473,7 +532,7 @@ struct PoolModeView: View {
             }
             .padding(.top, 10)
         } label: {
-            sectionTitle("04 / HUD 資訊顯示與隱藏", subtitle: "單獨隱藏不會影響其他資訊欄位。")
+            sectionHeader("04 / HUD 資訊顯示與隱藏", subtitle: "單獨隱藏不會影響其他資訊欄位。")
         }
         .tint(DepthStudioColors.cyan)
         .padding(14)
@@ -497,7 +556,7 @@ struct PoolModeView: View {
             }
             .padding(.top, 10)
         } label: {
-            sectionTitle("05 / 姓名與國家旗幟", subtitle: "支援七個國家／地區。")
+            sectionHeader("05 / 姓名與國家旗幟", subtitle: "支援七個國家／地區。")
         }
         .tint(DepthStudioColors.cyan)
         .padding(14)
@@ -506,7 +565,10 @@ struct PoolModeView: View {
 
     private var exportSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            sectionTitle("06 / 輸出影片", subtitle: "輸出 MP4，長邊至少 3840 px，保留來源影像與音訊。")
+            sectionTitle("06 / 輸出影片", subtitle: "輸出 4K 等級 MP4，依選擇的版型裁切，保留來源影像與音訊。")
+            let outputSize = ExportSizing.renderSize(aspect: stageRatio)
+            Text("輸出規格：\(playback.hasVideo ? outputAspect.title : "原始")・\(Int(outputSize.width)) × \(Int(outputSize.height))")
+                .font(.caption.weight(.semibold)).foregroundStyle(DepthStudioColors.muted)
             Button(action: exportVideo) {
                 HStack {
                     if isExporting { ProgressView().tint(.black) }
@@ -523,8 +585,9 @@ struct PoolModeView: View {
             .disabled(!canExport)
 
             if isExporting { ProgressView(value: exportProgress).tint(DepthStudioColors.cyan) }
-            Text(isExporting ? "輸出進度 \(Int(exportProgress * 100))%" : exportInfo)
+            Text(isExporting ? exportClock.label(progress: exportProgress) : exportInfo)
                 .font(.caption2).foregroundStyle(.secondary)
+                .accessibilityIdentifier("export.progressText")
             if let exportedVideoURL {
                 ShareLink(item: exportedVideoURL) {
                     Label("分享／另存輸出影片", systemImage: "square.and.arrow.up")
@@ -548,7 +611,136 @@ struct PoolModeView: View {
         }
     }
 
+    // MARK: AI speed analysis
+
+    private var aiAnalysisCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label("AI 即時速率分析", systemImage: "sparkles")
+                    .font(.subheadline.weight(.bold))
+                Spacer()
+                if isAnalyzing {
+                    Button("取消") { analysisTask?.cancel() }
+                        .font(.caption.weight(.semibold))
+                        .buttonStyle(.bordered).tint(DepthStudioColors.muted)
+                } else {
+                    Button(motionSignal == nil ? "開始分析" : "重新分析") { runAIAnalysis() }
+                        .font(.caption.weight(.bold))
+                        .buttonStyle(.borderedProminent).tint(DepthStudioColors.cyan)
+                        .foregroundStyle(.black)
+                        .disabled(!playback.hasVideo || timeline == nil)
+                        .accessibilityIdentifier("ai.analyze")
+                }
+            }
+            if isAnalyzing {
+                ProgressView(value: analysisProgress).tint(DepthStudioColors.cyan)
+            }
+            Text(analysisMessage ?? "標記出發與出水後，AI 會分析影片中選手與泳池背景的相對移動，估算每一刻的速率變化；各段總距離仍以你標記的節點為準。無法辨識時，速率會在平均值上下約 0.01～0.3 m/s 自然浮動。")
+                .font(.caption2).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(11)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DepthStudioColors.background, in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func speedSourceText(_ timeline: PoolTimeline) -> String {
+        let total = timeline.segmentSources.count
+        let ai = timeline.aiSegmentCount
+        if ai == total && total > 0 {
+            return "速率來源：AI 影像分析（各段距離以標記節點校正）。"
+        }
+        if ai > 0 {
+            return "速率來源：\(ai)／\(total) 段為 AI 影像分析，其餘為模擬浮動（約 ±0.01～0.3 m/s）。"
+        }
+        return "速率來源：模擬浮動（約 ±0.01～0.3 m/s，平均值等於各段實際平均速率）。可按「AI 即時速率分析」改用影像分析。"
+    }
+
+    private func runAIAnalysis() {
+        guard let url = videoURL else {
+            errorMessage = "請先匯入影片。"
+            return
+        }
+        guard let timeline else {
+            errorMessage = "請先標記出發與結束出水時間，再進行 AI 分析。"
+            return
+        }
+        analysisTask?.cancel()
+        errorMessage = nil
+        isAnalyzing = true
+        analysisProgress = 0
+        analysisMessage = "AI 正在分析影片中的選手與泳池背景…"
+        let analyzer = PoolMotionAnalyzer(url: url, startTime: timeline.startTime, endTime: timeline.finishTime)
+        analysisTask = Task { @MainActor in
+            do {
+                let signal = try await analyzer.analyze { value in
+                    Task { @MainActor in analysisProgress = value }
+                }
+                motionSignal = signal
+                let rate = Int((signal.detectionRate * 100).rounded())
+                if signal.detectionRate >= 0.3 {
+                    analysisMessage = "AI 分析完成：\(rate)% 的影格辨識到選手，速率已依影像中的加速、滑行與轉身調整。"
+                } else {
+                    analysisMessage = "AI 分析完成：選手辨識率 \(rate)%，速率改依畫面整體移動估算；如需更準確，可在轉身點之間加上校正點。"
+                }
+            } catch is CancellationError {
+                analysisMessage = "AI 分析已取消。"
+            } catch PoolMotionAnalyzer.AnalysisError.cancelled {
+                analysisMessage = "AI 分析已取消。"
+            } catch {
+                motionSignal = nil
+                analysisMessage = "AI 無法分析這段影片（\(error.localizedDescription)），速率使用模擬浮動。"
+            }
+            isAnalyzing = false
+        }
+    }
+
     // MARK: Small views and bindings
+
+    private var layoutButtons: some View {
+        HStack(spacing: 8) {
+            Button {
+                isEditingLayout.toggle()
+            } label: {
+                Label(isEditingLayout ? "排版：開" : "排版：關", systemImage: isEditingLayout ? "hand.draw.fill" : "hand.draw")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(isEditingLayout ? .black : DepthStudioColors.cyan)
+                    .padding(.horizontal, 10).padding(.vertical, 7)
+                    .background(isEditingLayout ? DepthStudioColors.cyan : DepthStudioColors.background, in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("layout.toggle")
+
+            Button {
+                confirmingSaveDefaultLayout = true
+            } label: {
+                Label("將目前排版設為預設", systemImage: "pin")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(DepthStudioColors.cyan)
+                    .padding(.horizontal, 10).padding(.vertical, 7)
+                    .background(DepthStudioColors.background, in: Capsule())
+                    .overlay(Capsule().stroke(DepthStudioColors.cyan.opacity(0.4), lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("layout.saveDefault")
+            Spacer(minLength: 0)
+        }
+    }
+
+    /// Section title with the 「預覽影像」 button that shows the floating preview.
+    private func sectionHeader(_ title: String, subtitle: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            sectionTitle(title, subtitle: subtitle)
+            Spacer(minLength: 4)
+            FloatingPreviewButton(isShowing: $showingFloatingPreview)
+        }
+    }
+
+    private func saveCurrentLayoutAsDefault() {
+        hudSettings.saveLayoutAsDefault()
+        hasCustomDefaultLayout = true
+        statusMessage = "已將目前排版設為預設；之後「恢復預設位置」會回到這個排版，重新啟動 App 也一樣。"
+    }
 
     private func sectionTitle(_ title: String, subtitle: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -637,12 +829,13 @@ struct PoolModeView: View {
     // MARK: Timeline actions
 
     private func jump(to node: PoolNode) {
-        guard let player, let time = node.videoTime else { return }
-        player.seek(to: CMTime(seconds: time, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+        guard playback.hasVideo, let time = node.videoTime else { return }
+        playback.pause()
+        playback.seek(to: time)
     }
 
     private func nudge(_ node: PoolNode, by delta: Double) {
-        let base = node.videoTime ?? currentVideoTime
+        let base = node.videoTime ?? playback.currentTime
         session.setTime(max(0, base + delta), for: node.id)
     }
 
@@ -716,10 +909,12 @@ struct PoolModeView: View {
     }
 
     private func applyImportedVideo(_ url: URL, displayName: String) {
-        player?.pause()
+        analysisTask?.cancel()
+        isAnalyzing = false
+        motionSignal = nil
+        analysisMessage = nil
         videoURL = url
-        player = AVPlayer(url: url)
-        currentVideoTime = 0
+        playback.load(url: url)
         exportedVideoURL = nil
         // Times from the demo or a previous video do not apply to this one.
         session.clearAllTimes()
@@ -732,14 +927,15 @@ struct PoolModeView: View {
     private func exportVideo() {
         guard let videoURL else { return }
         let timeline: PoolTimeline
-        do { timeline = try PoolTimeline(session: session) }
+        do { timeline = try PoolTimeline(session: session, motion: motionSignal) }
         catch { errorMessage = "無法開始輸出：\(error.localizedDescription)"; return }
 
         let destination = FileManager.default.temporaryDirectory
             .appendingPathComponent("DepthStudio_Pool_\(UUID().uuidString)_4K.mp4")
-        player?.pause()
+        playback.pause()
         isExporting = true
         exportProgress = 0
+        exportClock = ExportProgressClock()
         exportedVideoURL = nil
         errorMessage = nil
         exportInfo = "正在分析來源影片並準備 4K MP4…"
@@ -748,6 +944,7 @@ struct PoolModeView: View {
             videoURL: videoURL,
             timeline: timeline,
             settings: hudSettings,
+            aspect: outputAspect,
             outputURL: destination,
             progress: { value in
                 DispatchQueue.main.async { exportProgress = value }
@@ -806,79 +1003,65 @@ private enum PoolVideoImportError: LocalizedError {
     }
 }
 
-/// Video player with the pool HUD on top. Reports the playback time so the timeline
-/// section can mark points at the current frame.
-private struct PoolVideoPreview: View {
-    let player: AVPlayer
+/// Pool-mode stage: the imported video filling the chosen output shape (the same centre
+/// crop as the export) with the editable pool HUD on top.
+private struct PoolStageView: View {
+    let playback: PlaybackController
     let timeline: PoolTimeline?
     @Binding var settings: PoolHUDSettings
     @Binding var selectedHUDItem: String
     let isEditing: Bool
-    let onTimeChange: (Double) -> Void
-
-    @StateObject private var clock: DivePlayerClock
-
-    init(player: AVPlayer, timeline: PoolTimeline?, settings: Binding<PoolHUDSettings>,
-         selectedHUDItem: Binding<String>, isEditing: Bool, onTimeChange: @escaping (Double) -> Void) {
-        self.player = player
-        self.timeline = timeline
-        self._settings = settings
-        self._selectedHUDItem = selectedHUDItem
-        self.isEditing = isEditing
-        self.onTimeChange = onTimeChange
-        _clock = StateObject(wrappedValue: DivePlayerClock(player: player))
-    }
 
     var body: some View {
-        VStack(spacing: 12) {
-            ZStack {
-                Color.black
-                VideoPlayer(player: player)
-                    .background(Color.black)
-                PoolHUDOverlay(
-                    reading: timeline?.reading(atVideoTime: clock.currentVideoTime),
-                    timeline: timeline,
-                    settings: $settings,
-                    selectedItem: $selectedHUDItem,
-                    isEditing: isEditing
-                )
-            }
-            .aspectRatio(9.0 / 16.0, contentMode: .fit)
-            .frame(maxWidth: .infinity)
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.cyan.opacity(0.25), lineWidth: 1))
-
-            HStack(spacing: 12) {
-                Button { clock.togglePlayback() } label: {
-                    Image(systemName: clock.isPlaying ? "pause.fill" : "play.fill")
-                        .font(.headline).frame(width: 40, height: 40)
-                }
-                .buttonStyle(.bordered)
-                .tint(Color.cyan)
-
-                Slider(value: Binding(get: { clock.currentVideoTime }, set: { clock.seek(to: $0) }),
-                       in: 0...max(clock.duration, 0.1))
-                    .tint(Color.cyan)
-
-                Text("\(PoolFormat.clock(clock.currentVideoTime)) / \(PoolFormat.clock(clock.duration))")
-                    .font(.system(.caption2, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .fixedSize()
-            }
-
-            // Frame stepping for precise marking (about one frame at 30 fps, or 0.5 s).
-            HStack(spacing: 8) {
-                ForEach([-0.5, -0.033, 0.033, 0.5], id: \.self) { step in
-                    Button(step > 0 ? String(format: "+%.2gs", step) : String(format: "%.2gs", step)) {
-                        player.pause()
-                        clock.seek(to: clock.currentVideoTime + step)
-                    }
-                    .font(.caption.monospacedDigit())
-                    .buttonStyle(.bordered)
-                    .tint(DepthStudioColors.muted)
-                }
-            }
+        ZStack {
+            Color.black
+            PlayerLayerView(player: playback.player)
+            PoolHUDOverlay(
+                reading: timeline?.reading(atVideoTime: playback.currentTime),
+                timeline: timeline,
+                settings: $settings,
+                selectedItem: $selectedHUDItem,
+                isEditing: isEditing
+            )
         }
-        .onChange(of: clock.currentVideoTime) { _, newValue in onTimeChange(newValue) }
+    }
+}
+
+/// Floating 「預覽影像」 content for pool mode: a still of the current frame (or the empty
+/// stage) with the HUD, not editable.
+private struct PoolFloatingPreview: View {
+    let playback: PlaybackController
+    let timeline: PoolTimeline?
+    let settings: PoolHUDSettings
+
+    var body: some View {
+        ZStack {
+            if let url = playback.url {
+                VideoStillView(url: url, time: playback.currentTime)
+            } else {
+                LinearGradient(colors: [Color(red: 0.05, green: 0.30, blue: 0.40), Color(red: 0.015, green: 0.075, blue: 0.11)],
+                               startPoint: .top, endPoint: .bottom)
+            }
+            PoolHUDOverlay(
+                reading: playback.hasVideo
+                    ? timeline?.reading(atVideoTime: playback.currentTime)
+                    : timeline.map { $0.reading(atVideoTime: $0.startTime + $0.totalTime * 0.5) },
+                timeline: timeline,
+                settings: .constant(settings),
+                selectedItem: .constant(""),
+                isEditing: false
+            )
+        }
+    }
+}
+
+/// 「目前影片時間」, refreshed on its own during playback.
+private struct PlaybackTimeLabel: View {
+    let playback: PlaybackController
+
+    var body: some View {
+        Text(playback.hasVideo ? PoolFormat.preciseClock(playback.currentTime) : "尚未匯入影片")
+            .font(.system(.footnote, design: .monospaced).weight(.bold))
+            .foregroundStyle(playback.hasVideo ? DepthStudioColors.cyan : DepthStudioColors.muted)
     }
 }

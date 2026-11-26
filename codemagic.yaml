@@ -27,3 +27,25 @@ workflows:
     artifacts:
       - build/DepthStudio.ipa
       - build/xcodebuild-release.log
+
+  # Unit, export and UI tests on an iPhone simulator (started by Claude through the
+  # Codemagic API). Saves preview-vs-export images for review.
+  depth-studio-tests:
+    name: Depth Studio · simulator tests
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+    environment:
+      xcode: latest
+    scripts:
+      - name: Python checks
+        script: |
+          set -euo pipefail
+          python3 -m unittest discover -s tests -p 'test_*.py'
+      - name: Simulator tests (unit, export, UI)
+        script: |
+          set -euo pipefail
+          bash scripts/ci_test.sh
+    artifacts:
+      - build/test-artifacts/*.png
+      - build/test-summary.txt
+      - build/xcodebuild-test.log

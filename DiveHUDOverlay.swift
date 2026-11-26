@@ -1,6 +1,10 @@
 import SwiftUI
 
 /// Transparent, individually editable HUD matching the V8.18 web-preview items.
+///
+/// Sizes scale with the stage's short side (`HUDMetrics.unit`), the same rule the export
+/// uses, so the preview matches the exported video in every output shape. Each item only
+/// takes touches inside its own frame, and only while layout editing is on.
 struct DiveHUDOverlay: View {
     let reading: DiveReading?
     let samples: [DiveSample]
@@ -18,24 +22,18 @@ struct DiveHUDOverlay: View {
     var body: some View {
         GeometryReader { proxy in
             let size = proxy.size
+            let unit = HUDMetrics.unit(for: size)
             ZStack(alignment: .topLeading) {
                 if isEditing, let selected = settings.positions[selectedItem] {
                     snapGuides(size: size, point: selected)
                 }
 
                 ForEach(HUDItemDefinition.all) { definition in
-                    let liveItems: Set<String> = ["hudClock", "depthValue", "depthUnit", "elapsedValue", "elapsedLabel", "tempValue", "tempLabel", "speedValue", "speedLabel"]
-                    if (settings.visibility[definition.id] ?? true) && (!liveItems.contains(definition.id) || reading != nil) {
+                    if (settings.visibility[definition.id] ?? true)
+                        && (!HUDItemDefinition.liveIDs.contains(definition.id) || reading != nil) {
                         let point = settings.positions[definition.id] ?? HUDPoint(x: 50, y: 50)
                         let transform = settings.transforms[definition.id] ?? HUDTransform()
-                        hudItem(definition.id, size: size)
-                            .opacity(settings.opacity)
-                            .scaleEffect(settings.fontScale * transform.scale)
-                            .rotationEffect(.degrees(transform.rotation))
-                            .position(
-                                x: size.width * CGFloat(point.x / 100),
-                                y: size.height * CGFloat(min(100, max(0, point.y + settings.verticalOffset)) / 100)
-                            )
+                        hudItem(definition.id, size: size, unit: unit)
                             .overlay {
                                 if isEditing && selectedItem == definition.id {
                                     RoundedRectangle(cornerRadius: 5)
@@ -45,10 +43,19 @@ struct DiveHUDOverlay: View {
                                 }
                             }
                             .contentShape(Rectangle())
-                            .onTapGesture {
-                                if isEditing { selectedItem = definition.id }
-                            }
+                            .scaleEffect(settings.fontScale * transform.scale)
+                            .rotationEffect(.degrees(transform.rotation))
+                            .opacity(settings.opacity)
+                            .onTapGesture { if isEditing { selectedItem = definition.id } }
                             .gesture(dragGesture(id: definition.id, size: size))
+                            .allowsHitTesting(isEditing)
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel(definition.title)
+                            .accessibilityIdentifier("hud.\(definition.id)")
+                            .position(
+                                x: size.width * CGFloat(point.x / 100),
+                                y: size.height * CGFloat(min(100, max(0, point.y + settings.verticalOffset)) / 100)
+                            )
                     }
                 }
             }
@@ -59,30 +66,30 @@ struct DiveHUDOverlay: View {
     }
 
     @ViewBuilder
-    private func hudItem(_ id: String, size: CGSize) -> some View {
+    private func hudItem(_ id: String, size: CGSize, unit: CGFloat) -> some View {
         switch id {
         case "hudBrand":
             Text("● FREEDIVE / MISSION 02")
-                .font(.system(size: max(8, size.width * 0.027), weight: .bold, design: .rounded))
+                .font(.system(size: max(8, unit * 0.027), weight: .bold, design: .rounded))
                 .tracking(1.3).foregroundStyle(muted).shadow(color: cyan.opacity(0.55), radius: 5)
                 .fixedSize()
         case "hudClock":
             Text(timeLabel(reading?.elapsedSeconds ?? 0))
-                .font(.system(size: max(9, size.width * 0.030), weight: .semibold, design: .monospaced))
+                .font(.system(size: max(9, unit * 0.030), weight: .semibold, design: .monospaced))
                 .foregroundStyle(.white).shadow(color: cyan.opacity(0.55), radius: 6).fixedSize()
         case "identityGroup":
-            HStack(spacing: max(5, size.width * 0.012)) {
+            HStack(spacing: max(5, unit * 0.012)) {
                 if let flagName = HUDCountryOption.assetName(for: settings.country) {
                     Image(flagName)
                         .resizable().scaledToFit()
-                        .frame(height: max(12, size.width * 0.040 * settings.identityScale))
+                        .frame(height: max(12, unit * 0.040 * settings.identityScale))
                         .clipShape(RoundedRectangle(cornerRadius: 1))
                 }
                 Text(settings.displayName.isEmpty ? "name" : settings.displayName)
-                    .font(.system(size: max(11, size.width * 0.036 * settings.identityScale), weight: .heavy, design: .rounded))
+                    .font(.system(size: max(11, unit * 0.036 * settings.identityScale), weight: .heavy, design: .rounded))
                     .foregroundStyle(.white)
                 Text(settings.divingType)
-                    .font(.system(size: max(10, size.width * 0.034 * settings.identityScale), weight: .black, design: .rounded))
+                    .font(.system(size: max(10, unit * 0.034 * settings.identityScale), weight: .black, design: .rounded))
                     .tracking(0.8).foregroundStyle(cyan)
                     .padding(.leading, 5)
                     .overlay(alignment: .leading) { Rectangle().fill(cyan.opacity(0.55)).frame(width: 1).padding(.vertical, 2) }
@@ -91,60 +98,61 @@ struct DiveHUDOverlay: View {
             .fixedSize()
         case "depthValue":
             Text(reading.map { String(format: "%.1f", $0.depthMeters) } ?? "--.-")
-                .font(.system(size: max(30, size.width * 0.14), weight: .black, design: .rounded))
+                .font(.system(size: max(30, unit * 0.14), weight: .black, design: .rounded))
                 .tracking(-1.7).foregroundStyle(.white)
                 .shadow(color: cyan.opacity(0.95), radius: 13).shadow(color: .black.opacity(0.65), radius: 3, y: 2)
                 .fixedSize()
         case "depthUnit":
-            Text("M").font(.system(size: max(10, size.width * 0.038), weight: .heavy))
+            Text("M").font(.system(size: max(10, unit * 0.038), weight: .heavy))
                 .foregroundStyle(cyan).shadow(color: cyan.opacity(0.6), radius: 6).fixedSize()
         case "elapsedValue":
             Text(reading.map { timeLabel($0.elapsedSeconds) } ?? "--:--")
-                .font(.system(size: max(13, size.width * 0.055), weight: .heavy, design: .rounded).monospacedDigit())
+                .font(.system(size: max(13, unit * 0.055), weight: .heavy, design: .rounded).monospacedDigit())
                 .foregroundStyle(.white).shadow(color: cyan.opacity(0.5), radius: 6).fixedSize()
         case "elapsedLabel":
-            metricLabel("DIVE TIME", width: size.width)
+            metricLabel("DIVE TIME", unit: unit)
         case "tempValue":
             Text(reading?.temperatureCelsius.map { String(format: "%.1f°", $0) } ?? "--")
-                .font(.system(size: max(13, size.width * 0.055), weight: .heavy, design: .rounded).monospacedDigit())
+                .font(.system(size: max(13, unit * 0.055), weight: .heavy, design: .rounded).monospacedDigit())
                 .foregroundStyle(.white).shadow(color: cyan.opacity(0.5), radius: 6).fixedSize()
         case "tempLabel":
-            metricLabel("WATER TEMP", width: size.width)
+            metricLabel("WATER TEMP", unit: unit)
         case "speedValue":
             Text(String(format: "%.1f m/s", reading?.verticalSpeedMetersPerSecond ?? 0))
-                .font(.system(size: max(12, size.width * 0.050), weight: .heavy, design: .rounded).monospacedDigit())
+                .font(.system(size: max(12, unit * 0.050), weight: .heavy, design: .rounded).monospacedDigit())
                 .foregroundStyle(.white).shadow(color: cyan.opacity(0.5), radius: 6).fixedSize()
         case "speedLabel":
-            metricLabel("DEPTH / SEC", width: size.width)
+            metricLabel("DEPTH / SEC", unit: unit)
         case "profileTitle":
             Text("DEPTH PROFILE  /  0 M ↓ MAX DEPTH")
-                .font(.system(size: max(8, size.width * 0.025), weight: .bold, design: .rounded))
+                .font(.system(size: max(8, unit * 0.025), weight: .bold, design: .rounded))
                 .tracking(1).foregroundStyle(muted).shadow(color: cyan.opacity(0.5), radius: 4).fixedSize()
         case "profileBlock":
-            DepthProfileChart(samples: samples, reading: reading, maximumDepth: maximumDepth)
+            DepthProfileChart(samples: samples, reading: reading, maximumDepth: maximumDepth, unit: unit)
                 .frame(width: size.width * 0.91, height: size.height * 0.18)
                 .shadow(color: cyan.opacity(0.38), radius: 5)
         case "footerBrand":
             Text(deviceName.isEmpty ? "DEPTH STUDIO" : deviceName.uppercased())
-                .font(.system(size: max(8, size.width * 0.025), weight: .bold, design: .rounded))
+                .font(.system(size: max(8, unit * 0.025), weight: .bold, design: .rounded))
                 .tracking(1).foregroundStyle(muted).shadow(color: cyan.opacity(0.45), radius: 4).fixedSize()
         case "maxDepth":
             Text("MAX \(maximumDepth, specifier: "%.1f") M")
-                .font(.system(size: max(8, size.width * 0.025), weight: .bold, design: .rounded))
+                .font(.system(size: max(8, unit * 0.025), weight: .bold, design: .rounded))
                 .tracking(1).foregroundStyle(muted).shadow(color: cyan.opacity(0.45), radius: 4).fixedSize()
         default:
             EmptyView()
         }
     }
 
-    private func metricLabel(_ text: String, width: CGFloat) -> some View {
+    private func metricLabel(_ text: String, unit: CGFloat) -> some View {
         Text(text)
-            .font(.system(size: max(7, width * 0.023), weight: .bold, design: .rounded))
+            .font(.system(size: max(7, unit * 0.023), weight: .bold, design: .rounded))
             .tracking(1.1).foregroundStyle(muted).shadow(color: cyan.opacity(0.45), radius: 4).fixedSize()
     }
 
+    /// Drag in screen coordinates, so scaled or rotated items still follow the finger.
     private func dragGesture(id: String, size: CGSize) -> some Gesture {
-        DragGesture(minimumDistance: 2)
+        DragGesture(minimumDistance: 2, coordinateSpace: .global)
             .onChanged { value in
                 guard isEditing, size.width > 0, size.height > 0 else { return }
                 selectedItem = id
@@ -183,69 +191,97 @@ struct DiveHUDOverlay: View {
     }
 }
 
+/// Geometry of the depth profile, shared by the preview chart and the exported video so
+/// both draw the same grid, labels, curve and marker.
+struct DepthProfileGeometry {
+    let samples: [DiveSample]   // sorted by time, at least two
+    let maximumDepth: Double
+    let size: CGSize            // chart size
+    let unit: CGFloat           // HUDMetrics.unit of the whole frame
+
+    var plot: CGRect {
+        CGRect(x: size.width * 0.135, y: size.height * 0.06, width: size.width * 0.84, height: size.height * 0.70)
+    }
+    var first: Double { samples.first?.elapsedSeconds ?? 0 }
+    var last: Double { max(samples.last?.elapsedSeconds ?? 0, first + 0.001) }
+    var depthLimit: Double { max(10, (maximumDepth / 10).rounded(.up) * 10) }
+    var depthGrid: [Double] { Array(stride(from: 10.0, through: depthLimit, by: 10.0)) }
+
+    var depthLabelFont: CGFloat { max(7, unit * 0.0218) }
+    var timeLabelFont: CGFloat { max(6, unit * 0.0182) }
+    var point: CGFloat { HUDMetrics.point(unit: unit) }
+
+    func x(forTime time: Double) -> CGFloat {
+        plot.minX + CGFloat(min(1, max(0, (time - first) / (last - first)))) * plot.width
+    }
+
+    func y(forDepth depth: Double) -> CGFloat {
+        plot.minY + CGFloat(max(0, depth) / depthLimit) * plot.height
+    }
+
+    var curve: [CGPoint] { samples.map { CGPoint(x: x(forTime: $0.elapsedSeconds), y: y(forDepth: $0.depthMeters)) } }
+
+    func timeLabel(part: Int) -> String {
+        let value = max(0, Int(((last - first) * Double(part) / 3).rounded(.down)))
+        return String(format: "%02d:%02d", value / 60, value % 60)
+    }
+}
+
 /// Depth profile using the web preview's scale: deeper readings move downwards,
 /// the Y axis is labelled in metres and the X axis is split into three equal time spans.
 private struct DepthProfileChart: View {
     let samples: [DiveSample]
     let reading: DiveReading?
     let maximumDepth: Double
+    let unit: CGFloat
+
+    private let cyanColor = Color(red: 0.44, green: 0.93, blue: 1.0)
 
     var body: some View {
         GeometryReader { geometry in
             Canvas { context, size in
                 guard samples.count >= 2 else { return }
-                let sorted = samples.sorted { $0.elapsedSeconds < $1.elapsedSeconds }
-                let first = sorted.first!.elapsedSeconds
-                let last = max(sorted.last!.elapsedSeconds, first + 0.001)
-                let depthLimit = max(10, ceil(maximumDepth / 10) * 10)
-                let plot = CGRect(x: size.width * 0.135, y: size.height * 0.06,
-                                  width: size.width * 0.84, height: size.height * 0.70)
+                let chart = DepthProfileGeometry(samples: samples.sorted { $0.elapsedSeconds < $1.elapsedSeconds },
+                                                 maximumDepth: maximumDepth, size: size, unit: unit)
+                let plot = chart.plot
+                let pt = chart.point
                 let gridColor = Color(red: 0.63, green: 0.88, blue: 0.94).opacity(0.28)
+                let gridStyle = StrokeStyle(lineWidth: 0.7 * pt, dash: [2 * pt, 3 * pt])
 
-                for depth in stride(from: 10.0, through: depthLimit, by: 10.0) {
-                    let y = plot.minY + CGFloat(depth / depthLimit) * plot.height
+                for depth in chart.depthGrid {
+                    let y = chart.y(forDepth: depth)
                     var line = Path(); line.move(to: CGPoint(x: plot.minX, y: y)); line.addLine(to: CGPoint(x: plot.maxX, y: y))
-                    context.stroke(line, with: .color(gridColor), style: StrokeStyle(lineWidth: 0.7, dash: [2, 3]))
-                    context.draw(Text("\(Int(depth))m").font(.system(size: max(7, size.width * 0.024), weight: .semibold)).foregroundColor(.white.opacity(0.85)),
+                    context.stroke(line, with: .color(gridColor), style: gridStyle)
+                    context.draw(Text("\(Int(depth))m").font(.system(size: chart.depthLabelFont, weight: .semibold)).foregroundColor(.white.opacity(0.85)),
                                  at: CGPoint(x: size.width * 0.06, y: y))
                 }
 
                 for part in 1...3 {
-                    let fraction = CGFloat(part) / 3
-                    let x = plot.minX + fraction * plot.width
+                    let x = plot.minX + CGFloat(part) / 3 * plot.width
                     var line = Path(); line.move(to: CGPoint(x: x, y: plot.minY)); line.addLine(to: CGPoint(x: x, y: plot.maxY))
-                    context.stroke(line, with: .color(gridColor), style: StrokeStyle(lineWidth: 0.7, dash: [2, 3]))
-                    let elapsed = (last - first) * Double(part) / 3
-                    context.draw(Text(timeLabel(elapsed)).font(.system(size: max(6, size.width * 0.020), weight: .semibold, design: .monospaced)).foregroundColor(.white.opacity(0.8)),
+                    context.stroke(line, with: .color(gridColor), style: gridStyle)
+                    context.draw(Text(chart.timeLabel(part: part)).font(.system(size: chart.timeLabelFont, weight: .semibold, design: .monospaced)).foregroundColor(.white.opacity(0.8)),
                                  at: CGPoint(x: x, y: size.height * 0.91))
                 }
 
                 var curve = Path()
-                for (index, sample) in sorted.enumerated() {
-                    let x = plot.minX + CGFloat((sample.elapsedSeconds - first) / (last - first)) * plot.width
-                    let y = plot.minY + CGFloat(max(0, sample.depthMeters) / depthLimit) * plot.height
-                    if index == 0 { curve.move(to: CGPoint(x: x, y: y)) } else { curve.addLine(to: CGPoint(x: x, y: y)) }
+                for (index, point) in chart.curve.enumerated() {
+                    if index == 0 { curve.move(to: point) } else { curve.addLine(to: point) }
                 }
-                context.stroke(curve, with: .color(cyanColor), style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+                context.stroke(curve, with: .color(cyanColor), style: StrokeStyle(lineWidth: 2 * pt, lineCap: .round, lineJoin: .round))
 
-                if let reading, reading.elapsedSeconds >= first, reading.elapsedSeconds <= last {
-                    let fraction = CGFloat((reading.elapsedSeconds - first) / (last - first))
-                    let x = plot.minX + fraction * plot.width
-                    let y = plot.minY + CGFloat(max(0, reading.depthMeters) / depthLimit) * plot.height
+                if let reading, reading.elapsedSeconds >= chart.first, reading.elapsedSeconds <= chart.last {
+                    let x = chart.x(forTime: reading.elapsedSeconds)
+                    let y = chart.y(forDepth: reading.depthMeters)
                     var guide = Path(); guide.move(to: CGPoint(x: x, y: plot.minY)); guide.addLine(to: CGPoint(x: x, y: plot.maxY))
-                    context.stroke(guide, with: .color(cyanColor.opacity(0.75)), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
-                    context.fill(Path(ellipseIn: CGRect(x: x - 4, y: y - 4, width: 8, height: 8)), with: .color(.white))
-                    context.stroke(Path(ellipseIn: CGRect(x: x - 4, y: y - 4, width: 8, height: 8)), with: .color(cyanColor), lineWidth: 1.5)
+                    context.stroke(guide, with: .color(cyanColor.opacity(0.75)), style: StrokeStyle(lineWidth: 1 * pt, dash: [3 * pt, 3 * pt]))
+                    let r = 4 * pt
+                    let dot = CGRect(x: x - r, y: y - r, width: 2 * r, height: 2 * r)
+                    context.fill(Path(ellipseIn: dot), with: .color(.white))
+                    context.stroke(Path(ellipseIn: dot), with: .color(cyanColor), lineWidth: 1.5 * pt)
                 }
             }
             .frame(width: geometry.size.width, height: geometry.size.height)
         }
-    }
-
-    private var cyanColor: Color { Color(red: 0.44, green: 0.93, blue: 1.0) }
-
-    private func timeLabel(_ seconds: Double) -> String {
-        let value = max(0, Int(seconds.rounded(.down)))
-        return String(format: "%02d:%02d", value / 60, value % 60)
     }
 }

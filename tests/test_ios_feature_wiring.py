@@ -55,7 +55,8 @@ class IOSFeatureWiringTests(unittest.TestCase):
             self.assertIn(marker, CONTENT + SETTINGS)
 
     def test_export_has_4k_audio_and_mp4_validation(self):
-        self.assertIn("3840.0 / longEdge", EXPORTER)
+        self.assertIn("ExportSizing.renderSize(aspect:", EXPORTER)
+        self.assertIn("isFourKClass", EXPORTER)
         self.assertIn("sourceHadAudio", EXPORTER)
         self.assertIn("audioTrackMissing", EXPORTER)
         self.assertIn('"ftyp"', EXPORTER)

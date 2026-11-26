@@ -164,10 +164,48 @@ struct PoolReading: Equatable {
     let totalLaps: Int
 }
 
+/// Relative swimming motion measured from the video by PoolMotionAnalyzer (AI).
+/// Only its shape matters: each segment is rescaled so its distance matches the marks.
+struct PoolMotionSignal: Equatable {
+    /// Ascending video times in seconds.
+    let times: [Double]
+    /// Motion magnitude at each time (arbitrary units, >= 0), already smoothed.
+    let values: [Double]
+    /// Share of analysed frames (0...1) in which a swimmer was found.
+    let detectionRate: Double
+
+    /// Linear interpolation; nil outside the analysed range.
+    func value(at time: Double) -> Double? {
+        guard times.count == values.count, let first = times.first, let last = times.last,
+              time >= first - 0.25, time <= last + 0.25 else { return nil }
+        if time <= first { return values.first }
+        if time >= last { return values.last }
+        var low = 0
+        var high = times.count - 1
+        while low + 1 < high {
+            let mid = (low + high) / 2
+            if times[mid] <= time { low = mid } else { high = mid }
+        }
+        let span = times[high] - times[low]
+        guard span > 0 else { return values[low] }
+        let fraction = (time - times[low]) / span
+        return values[low] + (values[high] - values[low]) * fraction
+    }
+}
+
+/// Where a segment's speed variation comes from.
+enum PoolSpeedSource: Equatable {
+    /// Shaped by the AI motion analysis of the video.
+    case ai
+    /// No usable AI data: a smooth fluctuation of up to about ±0.22 m/s around the segment average.
+    case simulated
+}
+
 /// Distance and speed over time, computed from the timed points.
-/// Between two known points the distance changes linearly, so the speed in that
-/// segment is its average speed (分段平均速率). AI tracking of speed changes within a
-/// segment is a later stage.
+///
+/// Between two marked points the total distance is fixed by the marks; within that
+/// segment the speed follows a 0.1 s profile (AI-shaped or simulated) whose average is
+/// the segment's average speed, so the distance at every marked point is exact.
 struct PoolTimeline: Equatable {
     struct Point: Equatable {
         let time: Double
@@ -184,11 +222,23 @@ struct PoolTimeline: Equatable {
         var speed: Double { distance / duration }
     }
 
+    /// One 0.1 s step of the speed profile; the speed is constant within the step.
+    struct ProfileStep: Equatable {
+        let startTime: Double
+        let endTime: Double
+        let startDistance: Double
+        let speed: Double
+    }
+
+    static let stepDuration = 0.1
+
     let points: [Point]
     let poolLength: Double
     let finalDistance: Double
+    let steps: [ProfileStep]
+    let segmentSources: [PoolSpeedSource]
 
-    init(session: PoolSession) throws {
+    init(session: PoolSession, motion: PoolMotionSignal? = nil) throws {
         let timed = session.nodes.filter { $0.videoTime != nil }.sorted { $0.distance < $1.distance }
         guard let first = timed.first, first.kind == .start, let startTime = first.videoTime else {
             throw PoolTimelineError.missingStart
@@ -203,9 +253,20 @@ struct PoolTimeline: Equatable {
             }
             points.append(Point(time: time, distance: node.distance))
         }
+        var steps: [ProfileStep] = []
+        var sources: [PoolSpeedSource] = []
+        for (index, pair) in zip(points, points.dropFirst()).enumerated() {
+            let segment = Segment(startTime: pair.0.time, endTime: pair.1.time,
+                                  startDistance: pair.0.distance, endDistance: pair.1.distance)
+            let profile = Self.profile(for: segment, index: index, motion: motion)
+            steps.append(contentsOf: profile.steps)
+            sources.append(profile.source)
+        }
         self.points = points
         self.poolLength = session.poolLength
         self.finalDistance = session.finalDistance
+        self.steps = steps
+        self.segmentSources = sources
     }
 
     var startTime: Double { points[0].time }
@@ -220,7 +281,8 @@ struct PoolTimeline: Equatable {
         }
     }
 
-    var maximumSegmentSpeed: Double { segments.map(\.speed).max() ?? 0 }
+    var maximumSpeed: Double { steps.map(\.speed).max() ?? 0 }
+    var aiSegmentCount: Int { segmentSources.filter { $0 == .ai }.count }
 
     func reading(atVideoTime time: Double) -> PoolReading {
         let t = time.isFinite ? time : 0
@@ -232,9 +294,8 @@ struct PoolTimeline: Equatable {
             return PoolReading(videoTime: t, phase: .finished, distance: finalDistance, elapsedSeconds: totalTime,
                                speed: 0, lap: totalLaps, totalLaps: totalLaps)
         }
-        let current = self.segment(at: t)
-        let fraction = (t - current.startTime) / current.duration
-        let distance = current.startDistance + current.distance * fraction
+        let current = self.step(at: t)
+        let distance = current.startDistance + current.speed * (t - current.startTime)
         return PoolReading(videoTime: t, phase: .swimming, distance: distance, elapsedSeconds: t - startTime,
                            speed: current.speed, lap: lap(forDistance: distance), totalLaps: totalLaps)
     }
@@ -246,16 +307,104 @@ struct PoolTimeline: Equatable {
         return min(totalLaps, max(1, Int((distance / poolLength + 1e-9).rounded(.down)) + 1))
     }
 
-    /// The segment containing `time`, for startTime <= time < finishTime.
-    private func segment(at time: Double) -> Segment {
+    /// Profile points for drawing: (time, distance) at every step boundary.
+    var distanceSeries: [Point] {
+        var series = steps.map { Point(time: $0.startTime, distance: $0.startDistance) }
+        series.append(Point(time: finishTime, distance: finalDistance))
+        return series
+    }
+
+    /// Profile points for drawing: (time, speed) at the middle of every step.
+    var speedSeries: [(time: Double, speed: Double)] {
+        steps.map { (time: ($0.startTime + $0.endTime) / 2, speed: $0.speed) }
+    }
+
+    /// The profile step containing `time`, for startTime <= time < finishTime.
+    private func step(at time: Double) -> ProfileStep {
         var low = 0
-        var high = points.count - 1
-        while low + 1 < high {
-            let mid = (low + high) / 2
-            if points[mid].time <= time { low = mid } else { high = mid }
+        var high = steps.count - 1
+        while low < high {
+            let mid = (low + high + 1) / 2
+            if steps[mid].startTime <= time { low = mid } else { high = mid - 1 }
         }
-        let a = points[low], b = points[low + 1]
-        return Segment(startTime: a.time, endTime: b.time, startDistance: a.distance, endDistance: b.distance)
+        return steps[low]
+    }
+
+    // MARK: Profile construction
+
+    private static func profile(for segment: Segment, index: Int,
+                                motion: PoolMotionSignal?) -> (steps: [ProfileStep], source: PoolSpeedSource) {
+        let count = max(1, Int((segment.duration / stepDuration - 1e-9).rounded(.up)))
+        let dt = segment.duration / Double(count)
+        let mids = (0..<count).map { segment.startTime + (Double($0) + 0.5) * dt }
+        let average = segment.speed
+
+        var source = PoolSpeedSource.simulated
+        var weights: [Double]
+        if let ai = aiWeights(times: mids, motion: motion) {
+            source = .ai
+            // A nearly flat AI result still gets a little natural variation.
+            if standardDeviation(ai) < 0.03 {
+                let wiggle = simulatedWeights(times: mids, average: average, index: index)
+                weights = zip(ai, wiggle).map { $0 * $1 }
+            } else {
+                weights = ai
+            }
+        } else {
+            weights = simulatedWeights(times: mids, average: average, index: index)
+        }
+        var mean = weights.reduce(0, +) / Double(weights.count)
+        if !(mean > 0) || !mean.isFinite {
+            weights = Array(repeating: 1, count: count)
+            mean = 1
+        }
+
+        var steps: [ProfileStep] = []
+        steps.reserveCapacity(count)
+        var distance = segment.startDistance
+        for k in 0..<count {
+            let speed = average * weights[k] / mean
+            let start = segment.startTime + Double(k) * dt
+            let end = k == count - 1 ? segment.endTime : start + dt
+            steps.append(ProfileStep(startTime: start, endTime: end, startDistance: distance, speed: speed))
+            distance += speed * dt
+        }
+        return (steps, source)
+    }
+
+    /// Relative speed shape from the AI motion signal, or nil when it does not cover the segment.
+    private static func aiWeights(times: [Double], motion: PoolMotionSignal?) -> [Double]? {
+        guard let motion, !times.isEmpty else { return nil }
+        var values: [Double] = []
+        values.reserveCapacity(times.count)
+        for time in times {
+            guard let value = motion.value(at: time), value.isFinite, value >= 0 else { return nil }
+            values.append(value)
+        }
+        let mean = values.reduce(0, +) / Double(values.count)
+        guard mean > 1e-6 else { return nil }
+        // Keep the AI shape within a plausible range around the segment average.
+        return values.map { min(1.6, max(0.5, $0 / mean)) }
+    }
+
+    /// Smooth fluctuation (kick rhythm about 1.4 s plus a slower 3.3 s swell) of up to
+    /// ±0.22 m/s around the average, deterministic so the preview and the export match.
+    private static func simulatedWeights(times: [Double], average: Double, index: Int) -> [Double] {
+        let safeAverage = max(average, 0.01)
+        let amplitude = min(0.22, max(0.05, average * 0.12), safeAverage * 0.5)
+        let phase1 = Double(index) * 1.7 + 0.4
+        let phase2 = Double(index) * 0.9 + 1.3
+        return times.map { t in
+            let wave = 0.6 * sin(2 * Double.pi * t / 1.4 + phase1) + 0.4 * sin(2 * Double.pi * t / 3.3 + phase2)
+            return max(0.05, 1 + amplitude * wave / safeAverage)
+        }
+    }
+
+    private static func standardDeviation(_ values: [Double]) -> Double {
+        guard values.count > 1 else { return 0 }
+        let mean = values.reduce(0, +) / Double(values.count)
+        let variance = values.reduce(0) { $0 + ($1 - mean) * ($1 - mean) } / Double(values.count)
+        return variance.squareRoot()
     }
 }
 

@@ -33,6 +33,9 @@ targets:
       - path: PoolHUDSettings.swift
       - path: PoolHUDOverlay.swift
       - path: PoolVideoHUDLayer.swift
+      - path: PoolMotionAnalyzer.swift
+      - path: StudioShared.swift
+      - path: HUDLayerFactory.swift
       - path: DepthStudioApp.swift
       - path: HUDSettings.swift
       - path: DiveDataInterpolator.swift
@@ -44,13 +47,50 @@ targets:
     dependencies:
       - package: FIT
         product: FIT
+    scheme:
+      testTargets:
+        - DepthStudioTests
+        - DepthStudioUITests
     settings:
       base:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-        MARKETING_VERSION: "1.1.0"
+        PRODUCT_MODULE_NAME: DepthStudio
+        TARGETED_DEVICE_FAMILY: "1"
+        MARKETING_VERSION: "1.2.0"
         CURRENT_PROJECT_VERSION: "4"
         INFOPLIST_KEY_UILaunchStoryboardName: LaunchScreen
         PRODUCT_BUNDLE_IDENTIFIER: com.bananaflow.depthstudio
         PRODUCT_NAME: "Depth Studio"
         IPHONEOS_DEPLOYMENT_TARGET: "17.0"
         SWIFT_EMIT_LOC_STRINGS: YES
+
+  # Unit and integration tests (pool timeline, export sizes, layout defaults, a real
+  # 4K export of a generated video compared with the preview). Run by scripts/ci_test.sh.
+  DepthStudioTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: AppTests
+    dependencies:
+      - target: DepthStudio
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.bananaflow.depthstudio.tests
+        IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+        TARGETED_DEVICE_FAMILY: "1"
+
+  # UI tests: drag every HUD field, layout toggle, set/restore default layout.
+  DepthStudioUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: AppUITests
+    dependencies:
+      - target: DepthStudio
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.bananaflow.depthstudio.uitests
+        IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+        TARGETED_DEVICE_FAMILY: "1"

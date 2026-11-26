@@ -121,10 +121,32 @@ struct PoolHUDSettings: Codable, Equatable {
         return result
     }
 
-    mutating func resetLayout() {
-        let defaults = PoolHUDSettings()
-        positions = defaults.positions
-        transforms = defaults.transforms
+    /// Key of the user's own default pool layout (「將目前排版設為預設」).
+    static let customDefaultLayoutKey = "depthstudio.native.pool-hud-default-layout.v1"
+
+    static func customDefaultLayout(in store: UserDefaults = .standard) -> HUDLayoutPreset? {
+        HUDLayoutPresetStore.load(key: customDefaultLayoutKey, from: store)
+    }
+
+    func saveLayoutAsDefault(in store: UserDefaults = .standard) {
+        HUDLayoutPresetStore.save(HUDLayoutPreset(positions: positions, transforms: transforms),
+                                  key: Self.customDefaultLayoutKey, to: store)
+    }
+
+    static func clearCustomDefaultLayout(in store: UserDefaults = .standard) {
+        HUDLayoutPresetStore.clear(key: customDefaultLayoutKey, in: store)
+    }
+
+    /// Restores the user's default layout if one is saved, otherwise the built-in layout.
+    mutating func resetLayout(using store: UserDefaults = .standard) {
+        let builtIn = PoolHUDSettings()
+        if let preset = Self.customDefaultLayout(in: store) {
+            positions = builtIn.positions.merging(preset.positions) { _, custom in custom }
+            transforms = builtIn.transforms.merging(preset.transforms) { _, custom in custom }
+        } else {
+            positions = builtIn.positions
+            transforms = builtIn.transforms
+        }
     }
 
     mutating func setAllVisible(_ visible: Bool) {

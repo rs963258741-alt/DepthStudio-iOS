@@ -65,7 +65,7 @@ class PoolScreenWiringTests(unittest.TestCase):
     def test_import_mark_and_export_are_wired(self):
         self.assertIn("PhotosPicker(", VIEW)
         self.assertIn("loadTransferable(type: ImportedMovie.self)", VIEW)
-        self.assertIn("session.setTime(currentVideoTime, for: node.id)", VIEW)
+        self.assertIn("session.setTime(playback.currentTime, for: node.id)", VIEW)
         self.assertIn("DiveVideoExporter().exportPool(", VIEW)
         self.assertIn("PHPhotoLibrary.shared().performChanges", VIEW)
         self.assertIn("aspectRatio(9.0 / 16.0", VIEW)
@@ -74,7 +74,7 @@ class PoolScreenWiringTests(unittest.TestCase):
         self.assertIn("func exportVideo(", EXPORTER)
         self.assertIn("makeHUD: @escaping (CGSize, Double) -> CALayer", EXPORTER)
         self.assertIn("exportVideo(", EXPORT)
-        self.assertIn("calculationMode = .discrete", EXPORT)
+        self.assertIn("HUDLayerFactory.addSampledText", EXPORT)
 
 
 if __name__ == "__main__":

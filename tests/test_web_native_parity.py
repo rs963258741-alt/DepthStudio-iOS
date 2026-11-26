@@ -62,7 +62,7 @@ class WebV818NativeParityTests(unittest.TestCase):
         self.assertIn("GarminFITParser().parse", CONTENT)
         self.assertIn("AtmosUDDFParser().parse", CONTENT)
         self.assertIn("aspectRatio(9.0 / 16.0", CONTENT + (ROOT / "DiveVideoPreview.swift").read_text(encoding="utf-8"))
-        self.assertIn("3840.0 / longEdge", EXPORTER)
+        self.assertIn("ExportSizing.renderSize(aspect:", EXPORTER)
         self.assertIn("AVVideoCompositionCoreAnimationTool", EXPORTER)
         self.assertIn("countCompressedVideoSamples", EXPORTER)
         self.assertIn("decodeFirstVideoFrame", EXPORTER)

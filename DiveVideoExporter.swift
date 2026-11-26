@@ -36,7 +36,7 @@ enum DiveExportError: LocalizedError {
         case .unsupportedOutputType: return "目前輸出格式不受支援，請選擇 MP4。"
         case .exportFailed(let message): return "輸出工作失敗：\(message)"
         case .invalidMP4(let message): return "MP4 完整性檢查失敗：\(message)"
-        case .outputResolutionTooSmall: return "輸出影片長邊未達 3840 像素，未符合至少 4K 的要求。"
+        case .outputResolutionTooSmall: return "輸出影片未達 4K 等級畫素（3840 × 2160 的像素量）。"
         case .audioTrackMissing: return "來源影片含有音訊，但輸出影片沒有保留音訊軌。"
         case .videoPacketValidationFailed(let message): return "輸出影片封包驗證失敗：\(message)"
         case .videoFrameDecodeFailed: return "輸出影片無法解碼首個影格。"
@@ -45,9 +45,11 @@ enum DiveExportError: LocalizedError {
 }
 
 /// Native iOS counterpart of the V8.18 web canvas exporter.
-/// The editable HUD model is shared with the preview; the same positions,
-/// transforms, visibility, identity, global style and sync offset are rendered
-/// into the final MP4 using Core Animation.
+///
+/// The output frame has the shape chosen in the preview (版型) and the pixel count of 4K
+/// UHD (3840 × 2160 → exactly 2160 × 3840 for 9:16); the source video fills it with a
+/// centre crop, like the preview. The HUD is rendered with Core Animation from the same
+/// settings and the same sizing rules (HUDMetrics) as the SwiftUI preview.
 final class DiveVideoExporter {
     /// 深度潛水 export: the depth HUD over the source video.
     func export(
@@ -56,6 +58,7 @@ final class DiveVideoExporter {
         maximumDepth: Double,
         sync: TimelineSync,
         settings: DiveExportSettings,
+        aspect: OutputAspect = .original,
         outputURL: URL,
         progress: ((Double) -> Void)? = nil,
         completion: @escaping (Result<URL, Error>) -> Void
@@ -70,6 +73,7 @@ final class DiveVideoExporter {
             videoURL: videoURL,
             outputURL: outputURL,
             outputFileType: settings.outputFileType,
+            aspect: aspect,
             progress: progress,
             completion: completion,
             makeHUD: { renderSize, videoDuration in
@@ -79,13 +83,14 @@ final class DiveVideoExporter {
         )
     }
 
-    /// Shared export path for every mode: renders the source video at a long edge of at
-    /// least 3840 px, composites the HUD layer from `makeHUD(renderSize, videoDuration)`,
-    /// keeps the audio and validates the resulting MP4.
+    /// Shared export path for every mode: renders the source video into the chosen output
+    /// shape at 4K-class size, composites the HUD layer from `makeHUD(renderSize, videoDuration)`,
+    /// keeps the audio and validates the resulting MP4. `progress` receives 0...1 on the main actor.
     func exportVideo(
         videoURL: URL,
         outputURL: URL,
         outputFileType: AVFileType = .mp4,
+        aspect: OutputAspect = .original,
         progress: ((Double) -> Void)? = nil,
         completion: @escaping (Result<URL, Error>) -> Void,
         makeHUD: @escaping (CGSize, Double) -> CALayer
@@ -102,19 +107,12 @@ final class DiveVideoExporter {
                 let naturalSize = try await sourceVideoTrack.load(.naturalSize)
                 let preferredTransform = try await sourceVideoTrack.load(.preferredTransform)
                 let sourceFrameDuration = try await sourceVideoTrack.load(.minFrameDuration)
-                let transformedRect = CGRect(origin: .zero, size: naturalSize).applying(preferredTransform)
-                let sourceDisplayWidth = abs(transformedRect.width)
-                let sourceDisplayHeight = abs(transformedRect.height)
-                guard sourceDisplayWidth > 0, sourceDisplayHeight > 0 else { throw DiveExportError.invalidDuration }
+                let displayRect = CGRect(origin: .zero, size: naturalSize).applying(preferredTransform)
+                let sourceSize = CGSize(width: abs(displayRect.width), height: abs(displayRect.height))
+                guard sourceSize.width > 0, sourceSize.height > 0 else { throw DiveExportError.invalidDuration }
 
-                // Keep the source's aspect ratio and ensure the long edge is at least 3840 px.
-                let longEdge = max(sourceDisplayWidth, sourceDisplayHeight)
-                let factor = longEdge >= 3840 ? 1.0 : 3840.0 / longEdge
-                let targetWidth = evenPixel(sourceDisplayWidth * factor)
-                let targetHeight = evenPixel(sourceDisplayHeight * factor)
-                let renderSize = CGSize(width: targetWidth, height: targetHeight)
-
-                let composition = try await makeVideoComposition(
+                let renderSize = ExportSizing.renderSize(aspect: aspect.ratio(source: sourceSize.width / sourceSize.height))
+                let composition = makeVideoComposition(
                     sourceVideoTrack: sourceVideoTrack,
                     duration: duration,
                     naturalSize: naturalSize,
@@ -132,14 +130,19 @@ final class DiveVideoExporter {
                 session.videoComposition = composition
                 session.outputURL = outputURL
                 session.outputFileType = outputFileType
-                session.shouldOptimizeForNetworkUse = true
+                // Moving the index to the front rewrites the whole file once more; Photos
+                // and sharing do not need it.
+                session.shouldOptimizeForNetworkUse = false
 
+                // Poll progress until the session has finished. (It starts in .waiting, so
+                // the loop must not stop just because the status is not .exporting yet.)
                 let progressTask = Task.detached(priority: .utility) {
                     while !Task.isCancelled {
+                        let status = session.status
+                        if status == .completed || status == .failed || status == .cancelled { break }
                         let value = Double(session.progress)
                         await MainActor.run { progress?(value) }
-                        if session.status != .exporting { break }
-                        try? await Task.sleep(nanoseconds: 300_000_000)
+                        try? await Task.sleep(nanoseconds: 250_000_000)
                     }
                 }
                 do {
@@ -169,9 +172,12 @@ final class DiveVideoExporter {
         }
     }
 
-    private func evenPixel(_ value: CGFloat) -> CGFloat {
-        let rounded = max(2, Int(value.rounded()))
-        return CGFloat(rounded.isMultiple(of: 2) ? rounded : rounded + 1)
+    /// Output frame rate: the source's, capped at 60 fps (120/240 fps clips would multiply
+    /// the 4K encoding work without visible benefit).
+    static func outputFrameDuration(source: CMTime) -> CMTime {
+        let fastest = CMTime(value: 1, timescale: 60)
+        guard source.isValid, source.seconds.isFinite, source.seconds > 0 else { return CMTime(value: 1, timescale: 30) }
+        return source.seconds < fastest.seconds ? fastest : source
     }
 
     private func makeVideoComposition(
@@ -182,19 +188,24 @@ final class DiveVideoExporter {
         sourceFrameDuration: CMTime,
         renderSize: CGSize,
         hud: CALayer
-    ) async throws -> AVMutableVideoComposition {
-        let transformedRect = CGRect(origin: .zero, size: naturalSize).applying(preferredTransform)
-        let normalizedTransform = preferredTransform.concatenating(
-            CGAffineTransform(translationX: -transformedRect.minX, y: -transformedRect.minY)
+    ) -> AVMutableVideoComposition {
+        // Source pixels → upright display coordinates (0...width, 0...height).
+        let displayRect = CGRect(origin: .zero, size: naturalSize).applying(preferredTransform)
+        let toDisplay = preferredTransform.concatenating(
+            CGAffineTransform(translationX: -displayRect.minX, y: -displayRect.minY)
         )
-        let scaleX = renderSize.width / max(1, abs(transformedRect.width))
-        let scaleY = renderSize.height / max(1, abs(transformedRect.height))
-        let outputTransform = normalizedTransform.scaledBy(x: scaleX, y: scaleY)
+        let sourceSize = CGSize(width: abs(displayRect.width), height: abs(displayRect.height))
+        // Fill the output frame and crop the overflow evenly, like the preview's aspect-fill.
+        let scale = max(renderSize.width / max(1, sourceSize.width), renderSize.height / max(1, sourceSize.height))
+        let fill = CGAffineTransform(scaleX: scale, y: scale).concatenating(
+            CGAffineTransform(translationX: (renderSize.width - sourceSize.width * scale) / 2,
+                              y: (renderSize.height - sourceSize.height * scale) / 2)
+        )
+        let outputTransform = toDisplay.concatenating(fill)
 
         let composition = AVMutableVideoComposition()
         composition.renderSize = renderSize
-        composition.frameDuration = sourceFrameDuration.isValid && sourceFrameDuration.seconds > 0
-            ? sourceFrameDuration : CMTime(value: 1, timescale: 30)
+        composition.frameDuration = Self.outputFrameDuration(source: sourceFrameDuration)
 
         let instruction = AVMutableVideoCompositionInstruction()
         instruction.timeRange = CMTimeRange(start: .zero, duration: duration)
@@ -219,6 +230,18 @@ final class DiveVideoExporter {
         return composition
     }
 
+    // MARK: Depth HUD
+
+    private struct TextSpec {
+        var text: String
+        var font: UIFont
+        var color: UIColor
+        var tracking: CGFloat = 0
+        var glowOpacity: Float
+        var glowRadius: CGFloat
+        var live: ((DiveReading) -> String)? = nil
+    }
+
     private func makeHUDLayer(
         size: CGSize,
         samples: [DiveSample],
@@ -231,328 +254,213 @@ final class DiveVideoExporter {
         hud.frame = CGRect(origin: .zero, size: size)
         hud.opacity = Float(settings.hudSettings.opacity)
         hud.masksToBounds = false
-        let sorted = samples.sorted { $0.elapsedSeconds < $1.elapsedSeconds }
-        let maximum = max(maximumDepth, sorted.map(\.depthMeters).max() ?? 0)
+        let hudSettings = settings.hudSettings
+        let unit = HUDMetrics.unit(for: size)
+        let maximum = max(maximumDepth, samples.map(\.depthMeters).max() ?? 0)
+        let interpolator = try? DiveDataInterpolator(samples: samples)
+
+        // The recorded dive in video time; live values only show inside it (as in the preview).
+        let diveStart = max(0, videoTime(forWatchTime: samples[0].elapsedSeconds, sync: sync))
+        let diveEnd = min(videoDuration, videoTime(forWatchTime: samples[samples.count - 1].elapsedSeconds, sync: sync))
+        var liveTimes: [Double] = []
+        if diveEnd > diveStart {
+            var t = diveStart
+            while t < diveEnd {
+                liveTimes.append(t)
+                t += 0.1
+            }
+            liveTimes.append(diveEnd)
+        }
+        func reading(at videoTime: Double) -> DiveReading? {
+            interpolator?.reading(at: sync.watchTime(forVideoTime: videoTime))
+        }
 
         for item in HUDItemDefinition.all {
-            guard settings.hudSettings.visibility[item.id] ?? true else { continue }
-            let point = settings.hudSettings.positions[item.id] ?? HUDPoint(x: 50, y: 50)
-            let transform = settings.hudSettings.transforms[item.id] ?? HUDTransform()
-            let yPercent = min(100, max(0, point.y + settings.hudSettings.verticalOffset))
-            let position = CGPoint(x: size.width * CGFloat(point.x / 100), y: size.height * CGFloat(yPercent / 100))
-            let itemLayer = CALayer()
-            let itemSize = itemBounds(for: item.id, size: size)
-            itemLayer.bounds = CGRect(origin: .zero, size: itemSize)
-            itemLayer.position = position
-            itemLayer.anchorPoint = CGPoint(x: 0.5, y: 0.5)
-            let scale = CGFloat(transform.scale * settings.hudSettings.fontScale)
-            itemLayer.setAffineTransform(CGAffineTransform(rotationAngle: transform.rotation * .pi / 180).scaledBy(x: scale, y: scale))
-            itemLayer.masksToBounds = false
-            addItemContent(item.id, to: itemLayer, itemSize: itemSize, canvasSize: size,
-                           samples: sorted, maximumDepth: maximum, videoDuration: videoDuration,
-                           sync: sync, settings: settings)
-            hud.addSublayer(itemLayer)
+            guard hudSettings.visibility[item.id] ?? true else { continue }
+            let layer: CALayer
+            switch item.id {
+            case "identityGroup":
+                layer = HUDLayerFactory.identity(name: hudSettings.displayName, type: hudSettings.divingType,
+                                                 countryID: hudSettings.country,
+                                                 identityScale: hudSettings.identityScale, unit: unit)
+                HUDLayerFactory.rasterize(layer)
+            case "profileBlock":
+                layer = depthProfileLayer(chartSize: CGSize(width: size.width * 0.91, height: size.height * 0.18),
+                                          samples: samples, maximumDepth: maximum, unit: unit,
+                                          videoDuration: videoDuration, sync: sync, interpolator: interpolator)
+            default:
+                guard let spec = textSpec(for: item.id, unit: unit, maximumDepth: maximum, deviceName: settings.deviceName) else { continue }
+                let box = CGRect(x: 0, y: 0, width: max(unit * 0.9, 10), height: HUDLayerFactory.lineHeight(of: spec.font) * 1.2)
+                let container = CALayer()
+                container.contentsScale = 1
+                container.bounds = box
+                let text = HUDLayerFactory.text(spec.text, in: box, font: spec.font, color: spec.color,
+                                                tracking: spec.tracking, glowOpacity: spec.glowOpacity,
+                                                glowRadius: spec.glowRadius)
+                container.addSublayer(text)
+                if let live = spec.live {
+                    HUDLayerFactory.addSampledText(to: text, times: liveTimes, duration: videoDuration,
+                                                   key: "hud-text-\(item.id)") { time in
+                        reading(at: time).map(live) ?? spec.text
+                    }
+                } else {
+                    HUDLayerFactory.rasterize(container)
+                }
+                layer = container
+            }
+            if HUDItemDefinition.liveIDs.contains(item.id) {
+                HUDLayerFactory.addVisibility(to: layer, start: diveStart, end: diveEnd,
+                                              duration: videoDuration, key: "hud-visibility-\(item.id)")
+            }
+            let point = hudSettings.positions[item.id] ?? HUDPoint(x: 50, y: 50)
+            let transform = hudSettings.transforms[item.id] ?? HUDTransform()
+            let yPercent = min(100, max(0, point.y + hudSettings.verticalOffset))
+            HUDLayerFactory.place(layer,
+                                  center: CGPoint(x: size.width * CGFloat(point.x / 100), y: size.height * CGFloat(yPercent / 100)),
+                                  scale: CGFloat(transform.scale * hudSettings.fontScale),
+                                  rotationDegrees: transform.rotation)
+            hud.addSublayer(layer)
         }
         return hud
     }
 
-    private func itemBounds(for id: String, size: CGSize) -> CGSize {
-        let w = size.width
-        let h = size.height
+    /// Text items with the same font sizes, weights, colours and glow as DiveHUDOverlay.
+    private func textSpec(for id: String, unit: CGFloat, maximumDepth: Double, deviceName: String) -> TextSpec? {
+        let pt = HUDMetrics.point(unit: unit)
+        let font = HUDLayerFactory.font
+        let white = HUDLayerFactory.white, cyan = HUDLayerFactory.cyan, muted = HUDLayerFactory.muted
+        func label(_ text: String) -> TextSpec {
+            TextSpec(text: text, font: font(unit * 0.023, .bold, .rounded), color: muted,
+                     tracking: 1.1 * pt, glowOpacity: 0.45, glowRadius: 4 * pt)
+        }
         switch id {
-        case "depthValue": return CGSize(width: w * 0.32, height: h * 0.17)
-        case "depthUnit": return CGSize(width: w * 0.12, height: h * 0.08)
-        case "elapsedValue", "tempValue", "speedValue": return CGSize(width: w * 0.31, height: h * 0.075)
-        case "elapsedLabel", "tempLabel", "speedLabel", "profileTitle", "hudBrand", "footerBrand", "maxDepth":
-            return CGSize(width: w * 0.44, height: h * 0.045)
-        case "hudClock": return CGSize(width: w * 0.23, height: h * 0.055)
-        case "identityGroup": return CGSize(width: w * 0.78, height: h * 0.10)
-        case "profileBlock": return CGSize(width: w * 0.91, height: h * 0.18)
-        default: return CGSize(width: w * 0.3, height: h * 0.06)
+        case "hudBrand":
+            return TextSpec(text: "● FREEDIVE / MISSION 02", font: font(unit * 0.027, .bold, .rounded), color: muted,
+                            tracking: 1.3 * pt, glowOpacity: 0.55, glowRadius: 5 * pt)
+        case "hudClock":
+            return TextSpec(text: "00:00", font: font(unit * 0.030, .semibold, .monospaced), color: white,
+                            glowOpacity: 0.55, glowRadius: 6 * pt, live: { self.timeLabel($0.elapsedSeconds) })
+        case "depthValue":
+            return TextSpec(text: "--.-", font: font(unit * 0.14, .black, .rounded), color: white,
+                            glowOpacity: 0.95, glowRadius: 13 * pt, live: { String(format: "%.1f", $0.depthMeters) })
+        case "depthUnit":
+            return TextSpec(text: "M", font: font(unit * 0.038, .heavy, .standard), color: cyan,
+                            glowOpacity: 0.6, glowRadius: 6 * pt)
+        case "elapsedValue":
+            return TextSpec(text: "--:--", font: font(unit * 0.055, .heavy, .rounded), color: white,
+                            glowOpacity: 0.5, glowRadius: 6 * pt, live: { self.timeLabel($0.elapsedSeconds) })
+        case "elapsedLabel": return label("DIVE TIME")
+        case "tempValue":
+            return TextSpec(text: "--", font: font(unit * 0.055, .heavy, .rounded), color: white,
+                            glowOpacity: 0.5, glowRadius: 6 * pt,
+                            live: { $0.temperatureCelsius.map { String(format: "%.1f°", $0) } ?? "--" })
+        case "tempLabel": return label("WATER TEMP")
+        case "speedValue":
+            return TextSpec(text: "0.0 m/s", font: font(unit * 0.050, .heavy, .rounded), color: white,
+                            glowOpacity: 0.5, glowRadius: 6 * pt,
+                            live: { String(format: "%.1f m/s", $0.verticalSpeedMetersPerSecond ?? 0) })
+        case "speedLabel": return label("DEPTH / SEC")
+        case "profileTitle":
+            return TextSpec(text: "DEPTH PROFILE  /  0 M ↓ MAX DEPTH", font: font(unit * 0.025, .bold, .rounded),
+                            color: muted, tracking: 1 * pt, glowOpacity: 0.5, glowRadius: 4 * pt)
+        case "footerBrand":
+            return TextSpec(text: deviceName.isEmpty ? "DEPTH STUDIO" : deviceName.uppercased(),
+                            font: font(unit * 0.025, .bold, .rounded), color: muted,
+                            tracking: 1 * pt, glowOpacity: 0.45, glowRadius: 4 * pt)
+        case "maxDepth":
+            return TextSpec(text: String(format: "MAX %.1f M", maximumDepth), font: font(unit * 0.025, .bold, .rounded),
+                            color: muted, tracking: 1 * pt, glowOpacity: 0.45, glowRadius: 4 * pt)
+        default:
+            return nil
         }
     }
 
-    private func addItemContent(
-        _ id: String,
-        to container: CALayer,
-        itemSize: CGSize,
-        canvasSize: CGSize,
-        samples: [DiveSample],
-        maximumDepth: Double,
-        videoDuration: Double,
-        sync: TimelineSync,
-        settings: DiveExportSettings
-    ) {
-        let white = UIColor(red: 0.94, green: 0.99, blue: 1, alpha: 1)
-        let cyan = UIColor(red: 0.38, green: 0.91, blue: 1, alpha: 1)
-        let muted = UIColor(red: 0.74, green: 0.93, blue: 0.98, alpha: 1)
+    /// The depth chart, drawn with DepthProfileGeometry exactly like the preview chart:
+    /// dashed depth and time grid with labels, cyan curve, dashed playhead and marker dot.
+    private func depthProfileLayer(chartSize: CGSize, samples: [DiveSample], maximumDepth: Double, unit: CGFloat,
+                                   videoDuration: Double, sync: TimelineSync,
+                                   interpolator: DiveDataInterpolator?) -> CALayer {
+        let chart = DepthProfileGeometry(samples: samples, maximumDepth: maximumDepth, size: chartSize, unit: unit)
+        let plot = chart.plot
+        let pt = chart.point
+        let layer = CALayer()
+        layer.contentsScale = 1
+        layer.bounds = CGRect(origin: .zero, size: chartSize)
 
-        if id == "profileBlock" {
-            addProfile(to: container, size: itemSize, samples: samples, maximumDepth: maximumDepth,
-                       videoDuration: videoDuration, sync: sync, cyan: cyan)
-            return
+        let background = CALayer()
+        background.contentsScale = 1
+        background.frame = layer.bounds
+        let gridDash = [2 * pt, 3 * pt]
+        let labelFont = HUDLayerFactory.font(size: chart.depthLabelFont, weight: .semibold, design: .standard)
+        let timeFont = HUDLayerFactory.font(size: chart.timeLabelFont, weight: .semibold, design: .monospaced)
+        for depth in chart.depthGrid {
+            let y = chart.y(forDepth: depth)
+            background.addSublayer(HUDLayerFactory.line([CGPoint(x: plot.minX, y: y), CGPoint(x: plot.maxX, y: y)],
+                                                        color: HUDLayerFactory.grid, width: 0.7 * pt, dash: gridDash, cap: .butt))
+            let width = chartSize.width * 0.12
+            background.addSublayer(HUDLayerFactory.text("\(Int(depth))m",
+                                                        in: CGRect(x: chartSize.width * 0.06 - width / 2, y: y - 1, width: width, height: 2),
+                                                        font: labelFont, color: UIColor.white.withAlphaComponent(0.85)))
         }
-        if id == "identityGroup" {
-            addIdentity(to: container, size: itemSize,
-                        settings: settings.hudSettings, white: white, cyan: cyan)
-            return
+        for part in 1...3 {
+            let x = plot.minX + CGFloat(part) / 3 * plot.width
+            background.addSublayer(HUDLayerFactory.line([CGPoint(x: x, y: plot.minY), CGPoint(x: x, y: plot.maxY)],
+                                                        color: HUDLayerFactory.grid, width: 0.7 * pt, dash: gridDash, cap: .butt))
+            let width = chartSize.width * 0.2
+            background.addSublayer(HUDLayerFactory.text(chart.timeLabel(part: part),
+                                                        in: CGRect(x: x - width / 2, y: chartSize.height * 0.91 - 1, width: width, height: 2),
+                                                        font: timeFont, color: UIColor.white.withAlphaComponent(0.8)))
         }
+        let curve = HUDLayerFactory.line(chart.curve, color: HUDLayerFactory.chartCyan, width: 2 * pt)
+        curve.shadowColor = HUDLayerFactory.cyan.cgColor
+        curve.shadowOpacity = 0.38
+        curve.shadowRadius = 5 * pt
+        curve.shadowOffset = .zero
+        background.addSublayer(curve)
+        HUDLayerFactory.rasterize(background)
+        layer.addSublayer(background)
 
-        let fontSize: CGFloat
-        let color: UIColor
-        let weight: UIFont.Weight
-        let staticText: String
-        let dynamic: (DiveReading) -> String
-        switch id {
-        case "hudBrand": fontSize = canvasSize.width * 0.027; color = muted; weight = .bold; staticText = "● FREEDIVE / MISSION 02"; dynamic = { _ in "FREEDIVE / MISSION 02" }
-        case "hudClock": fontSize = canvasSize.width * 0.030; color = white; weight = .semibold; staticText = "00:00"; dynamic = { self.timeLabel($0.elapsedSeconds) }
-        case "depthValue": fontSize = canvasSize.width * 0.14; color = white; weight = .heavy; staticText = "--.-"; dynamic = { String(format: "%.1f", $0.depthMeters) }
-        case "depthUnit": fontSize = canvasSize.width * 0.038; color = cyan; weight = .heavy; staticText = "M"; dynamic = { _ in "M" }
-        case "elapsedValue": fontSize = canvasSize.width * 0.055; color = white; weight = .heavy; staticText = "--:--"; dynamic = { self.timeLabel($0.elapsedSeconds) }
-        case "elapsedLabel": fontSize = canvasSize.width * 0.023; color = muted; weight = .bold; staticText = "DIVE TIME"; dynamic = { _ in "DIVE TIME" }
-        case "tempValue": fontSize = canvasSize.width * 0.055; color = white; weight = .heavy; staticText = "--"; dynamic = { $0.temperatureCelsius.map { String(format: "%.1f°", $0) } ?? "--" }
-        case "tempLabel": fontSize = canvasSize.width * 0.023; color = muted; weight = .bold; staticText = "WATER TEMP"; dynamic = { _ in "WATER TEMP" }
-        case "speedValue": fontSize = canvasSize.width * 0.050; color = white; weight = .heavy; staticText = "0.0 m/s"; dynamic = { String(format: "%.1f m/s", $0.verticalSpeedMetersPerSecond ?? 0) }
-        case "speedLabel": fontSize = canvasSize.width * 0.023; color = muted; weight = .bold; staticText = "DEPTH / SEC"; dynamic = { _ in "DEPTH / SEC" }
-        case "profileTitle": fontSize = canvasSize.width * 0.025; color = muted; weight = .bold; staticText = "DEPTH PROFILE / 0 M ↓ MAX DEPTH"; dynamic = { _ in "DEPTH PROFILE / 0 M ↓ MAX DEPTH" }
-        case "footerBrand": fontSize = canvasSize.width * 0.025; color = muted; weight = .bold; staticText = settings.deviceName.uppercased(); dynamic = { _ in settings.deviceName.uppercased() }
-        case "maxDepth": fontSize = canvasSize.width * 0.025; color = muted; weight = .bold; staticText = String(format: "MAX %.1f M", maximumDepth); dynamic = { _ in String(format: "MAX %.1f M", maximumDepth) }
-        default: fontSize = 14; color = white; weight = .bold; staticText = ""; dynamic = { _ in "" }
+        // Playhead and marker follow the video time inside the recorded dive.
+        let diveStart = max(0, videoTime(forWatchTime: chart.first, sync: sync))
+        let diveEnd = min(videoDuration, videoTime(forWatchTime: chart.last, sync: sync))
+        guard diveEnd > diveStart, let interpolator else { return layer }
+        var times: [Double] = []
+        var t = diveStart
+        while t < diveEnd {
+            times.append(t)
+            t += 0.1
         }
+        times.append(diveEnd)
 
-        let text = makeTextLayer(text: staticText, frame: CGRect(origin: .zero, size: itemSize),
-                                 fontSize: max(7, fontSize), weight: weight, color: color,
-                                 tracking: id == "hudBrand" || id == "footerBrand" || id == "profileTitle" || id == "maxDepth" ? 1.2 : 0)
-        container.addSublayer(text)
-        if ["hudClock", "depthValue", "elapsedValue", "tempValue", "speedValue"].contains(id) {
-            addDynamicTextAnimation(to: text, id: id, samples: samples, maximumDepth: maximumDepth,
-                                    videoDuration: videoDuration, sync: sync, textProvider: dynamic)
+        let guide = HUDLayerFactory.line([CGPoint(x: 0, y: 0), CGPoint(x: 0, y: plot.height)],
+                                         color: HUDLayerFactory.chartCyan.withAlphaComponent(0.75),
+                                         width: 1 * pt, dash: [3 * pt, 3 * pt], cap: .butt)
+        guide.bounds = CGRect(x: 0, y: 0, width: max(1, pt), height: plot.height)
+        layer.addSublayer(guide)
+        HUDLayerFactory.addPositionAnimation(to: guide, times: times, duration: videoDuration, key: "depth-guide") { time in
+            let watch = sync.watchTime(forVideoTime: time)
+            return CGPoint(x: chart.x(forTime: watch), y: plot.midY)
         }
-    }
+        HUDLayerFactory.addVisibility(to: guide, start: diveStart, end: diveEnd, duration: videoDuration, key: "depth-guide-visibility")
 
-    private func addIdentity(to container: CALayer, size: CGSize,
-                             settings: HUDSettings, white: UIColor, cyan: UIColor) {
-        let fontSize = max(12, size.width * 0.047 * CGFloat(settings.identityScale))
-        let name = settings.displayName.isEmpty ? "name" : settings.displayName
-        let nameFont = UIFont.systemFont(ofSize: fontSize, weight: .heavy)
-        let typeFont = UIFont.systemFont(ofSize: fontSize * 0.96, weight: .black)
-        let nameWidth = (name as NSString).size(withAttributes: [.font: nameFont]).width
-        let typeWidth = (settings.divingType as NSString).size(withAttributes: [.font: typeFont]).width
-        let flagImage = HUDCountryOption.assetName(for: settings.country).flatMap { UIImage(named: $0) }
-        let flagHeight = fontSize * 1.28
-        let flagWidth = flagImage.map { flagHeight * $0.size.width / max(1, $0.size.height) } ?? 0
-        let flagGap = flagWidth > 0 ? fontSize * 0.42 : 0
-        let typeGap = fontSize * 0.9
-        let totalWidth = flagWidth + flagGap + nameWidth + typeGap + typeWidth
-        var x = (size.width - totalWidth) / 2
-
-        if let image = flagImage, let cgImage = image.cgImage {
-            let flag = CALayer()
-            flag.contents = cgImage
-            flag.contentsGravity = .resizeAspect
-            flag.contentsScale = UIScreen.main.scale
-            flag.frame = CGRect(x: x, y: (size.height - flagHeight) / 2, width: flagWidth, height: flagHeight)
-            flag.cornerRadius = 1
-            flag.masksToBounds = true
-            container.addSublayer(flag)
-            x += flagWidth + flagGap
+        let marker = HUDLayerFactory.dot(diameter: 8 * pt, fill: .white, stroke: HUDLayerFactory.chartCyan, strokeWidth: 1.5 * pt)
+        layer.addSublayer(marker)
+        HUDLayerFactory.addPositionAnimation(to: marker, times: times, duration: videoDuration, key: "depth-marker") { time in
+            let watch = sync.watchTime(forVideoTime: time)
+            let depth = interpolator.reading(at: watch)?.depthMeters ?? 0
+            return CGPoint(x: chart.x(forTime: watch), y: chart.y(forDepth: depth))
         }
-        let nameLayer = makeTextLayer(text: name, frame: CGRect(x: x, y: 0, width: nameWidth + 2, height: size.height),
-                                      fontSize: fontSize, weight: .heavy, color: white)
-        nameLayer.alignmentMode = .left
-        container.addSublayer(nameLayer)
-        x += nameWidth + typeGap
-        let typeLayer = makeTextLayer(text: settings.divingType,
-                                      frame: CGRect(x: x, y: 0, width: typeWidth + 2, height: size.height),
-                                      fontSize: fontSize * 0.96, weight: .black, color: cyan)
-        typeLayer.alignmentMode = .left
-        container.addSublayer(typeLayer)
-    }
-
-    func makeTextLayer(text: String, frame: CGRect, fontSize: CGFloat, weight: UIFont.Weight,
-                               color: UIColor, tracking: CGFloat = 0) -> CATextLayer {
-        let layer = CATextLayer()
-        layer.string = text
-        layer.alignmentMode = .center
-        layer.isWrapped = false
-        layer.truncationMode = .none
-        layer.contentsScale = UIScreen.main.scale
-        layer.font = UIFont.systemFont(ofSize: fontSize, weight: weight)
-        layer.fontSize = fontSize
-        layer.foregroundColor = color.cgColor
-        layer.frame = frame
-        layer.shadowColor = UIColor(red: 0.20, green: 0.82, blue: 1, alpha: 1).cgColor
-        layer.shadowOpacity = 0.48
-        layer.shadowRadius = max(2, fontSize * 0.12)
-        layer.shadowOffset = CGSize(width: 0, height: 1)
-        if tracking > 0 {
-            layer.string = NSAttributedString(string: text, attributes: [
-                .font: UIFont.systemFont(ofSize: fontSize, weight: weight),
-                .foregroundColor: color,
-                .kern: tracking
-            ])
-        }
+        HUDLayerFactory.addVisibility(to: marker, start: diveStart, end: diveEnd, duration: videoDuration, key: "depth-marker-visibility")
         return layer
     }
 
-    private func addDynamicTextAnimation(to layer: CATextLayer, id: String, samples: [DiveSample],
-                                         maximumDepth: Double, videoDuration: Double, sync: TimelineSync,
-                                         textProvider: (DiveReading) -> String) {
-        guard let interpolator = try? DiveDataInterpolator(samples: samples) else {
-            layer.opacity = 0
-            return
+    /// Inverse of TimelineSync.watchTime(forVideoTime:).
+    private func videoTime(forWatchTime watchTime: Double, sync: TimelineSync) -> Double {
+        guard let second = sync.second else {
+            return watchTime - sync.first.watchSeconds + sync.first.videoSeconds
         }
-        let frames = animationFrames(samples: samples, videoDuration: videoDuration, sync: sync)
-        var values: [String] = []
-        var times: [NSNumber] = []
-        for frame in frames {
-            guard let reading = interpolator.reading(at: frame.watchTime) else { continue }
-            values.append(textProvider(reading))
-            times.append(NSNumber(value: min(1, max(0, frame.videoTime / max(0.001, videoDuration)))) )
-        }
-        guard let first = values.first, let firstTime = times.first?.doubleValue,
-              let lastTime = times.last?.doubleValue else {
-            layer.opacity = 0
-            return
-        }
-        layer.string = first
-        if values.count > 1 {
-            let animation = CAKeyframeAnimation(keyPath: "string")
-            animation.values = values
-            animation.keyTimes = times
-            animation.duration = videoDuration
-            animation.beginTime = AVCoreAnimationBeginTimeAtZero
-            animation.calculationMode = .discrete
-            animation.isRemovedOnCompletion = false
-            animation.fillMode = .both
-            layer.add(animation, forKey: "hud-text-\(id)")
-        }
-        // The web preview hides live telemetry outside the valid dive interval.
-        addDataVisibilityAnimation(to: layer, start: firstTime, end: lastTime,
-                                   duration: videoDuration, key: "hud-visibility-\(id)")
-    }
-
-    private func addDataVisibilityAnimation(to layer: CALayer, start: Double, end: Double,
-                                            duration: Double, key: String) {
-        let safeStart = min(1, max(0, start))
-        let safeEnd = min(1, max(safeStart, end))
-        var values: [NSNumber] = []
-        var keyTimes: [NSNumber] = []
-        if safeStart > 0 {
-            values.append(NSNumber(value: 0))
-            keyTimes.append(NSNumber(value: 0))
-        }
-        values.append(NSNumber(value: 1))
-        keyTimes.append(NSNumber(value: safeStart))
-        if safeEnd < 1 {
-            if safeEnd > safeStart {
-                values.append(NSNumber(value: 1))
-                keyTimes.append(NSNumber(value: safeEnd))
-            }
-            values.append(NSNumber(value: 0))
-            keyTimes.append(NSNumber(value: 1))
-        }
-        layer.opacity = safeStart == 0 ? 1 : 0
-        guard values.count > 1 else { return }
-        let animation = CAKeyframeAnimation(keyPath: "opacity")
-        animation.values = values
-        animation.keyTimes = keyTimes
-        animation.duration = duration
-        animation.beginTime = AVCoreAnimationBeginTimeAtZero
-        animation.calculationMode = .linear
-        animation.isRemovedOnCompletion = false
-        animation.fillMode = .both
-        layer.add(animation, forKey: key)
-    }
-
-    private func addProfile(to container: CALayer, size: CGSize, samples: [DiveSample], maximumDepth: Double,
-                            videoDuration: Double, sync: TimelineSync, cyan: UIColor) {
-        guard samples.count >= 2 else { return }
-        let chart = CALayer()
-        chart.frame = CGRect(origin: .zero, size: size)
-        container.addSublayer(chart)
-        let plot = CGRect(x: size.width * 0.135, y: size.height * 0.06,
-                          width: size.width * 0.84, height: size.height * 0.70)
-        let depthLimit = max(10, ceil(maximumDepth / 10) * 10)
-        let axisColor = UIColor(red: 0.67, green: 0.89, blue: 0.95, alpha: 0.50)
-
-        for depth in stride(from: 10.0, through: depthLimit, by: 10.0) {
-            let y = plot.minY + CGFloat(depth / depthLimit) * plot.height
-            let path = UIBezierPath(); path.move(to: CGPoint(x: plot.minX, y: y)); path.addLine(to: CGPoint(x: plot.maxX, y: y))
-            let grid = CAShapeLayer(); grid.path = path.cgPath; grid.strokeColor = axisColor.cgColor
-            grid.fillColor = UIColor.clear.cgColor; grid.lineWidth = 1; grid.lineDashPattern = [2, 3]
-            chart.addSublayer(grid)
-            let tick = makeTextLayer(text: "\(Int(depth))m", frame: CGRect(x: 0, y: y - 7, width: plot.minX - 3, height: 14),
-                                     fontSize: max(8, size.width * 0.025), weight: .semibold, color: axisColor)
-            tick.alignmentMode = .right
-            chart.addSublayer(tick)
-        }
-
-        let first = samples.first!.elapsedSeconds
-        let last = max(samples.last!.elapsedSeconds, first + 0.001)
-        for part in 1...3 {
-            let fraction = CGFloat(part) / 3
-            let x = plot.minX + fraction * plot.width
-            let path = UIBezierPath(); path.move(to: CGPoint(x: x, y: plot.minY)); path.addLine(to: CGPoint(x: x, y: plot.maxY))
-            let grid = CAShapeLayer(); grid.path = path.cgPath; grid.strokeColor = axisColor.withAlphaComponent(0.45).cgColor
-            grid.fillColor = UIColor.clear.cgColor; grid.lineWidth = 1; grid.lineDashPattern = [2, 3]
-            chart.addSublayer(grid)
-            let label = makeTextLayer(text: timeLabel((last - first) * Double(part) / 3),
-                                      frame: CGRect(x: x - 30, y: size.height * 0.82, width: 60, height: 15),
-                                      fontSize: max(8, size.width * 0.024), weight: .semibold, color: axisColor)
-            chart.addSublayer(label)
-        }
-
-        let curve = UIBezierPath()
-        for (index, sample) in samples.enumerated() {
-            let x = plot.minX + CGFloat((sample.elapsedSeconds - first) / (last - first)) * plot.width
-            let y = plot.minY + CGFloat(max(0, sample.depthMeters) / depthLimit) * plot.height
-            if index == 0 { curve.move(to: CGPoint(x: x, y: y)) } else { curve.addLine(to: CGPoint(x: x, y: y)) }
-        }
-        let glow = CAShapeLayer(); glow.path = curve.cgPath; glow.strokeColor = cyan.withAlphaComponent(0.38).cgColor
-        glow.fillColor = UIColor.clear.cgColor; glow.lineWidth = max(3, size.width * 0.012); glow.lineCap = .round
-        glow.shadowColor = cyan.cgColor; glow.shadowOpacity = 0.8; glow.shadowRadius = 6
-        chart.addSublayer(glow)
-        let line = CAShapeLayer(); line.path = curve.cgPath; line.strokeColor = UIColor.white.cgColor
-        line.fillColor = UIColor.clear.cgColor; line.lineWidth = max(1.5, size.width * 0.006); line.lineCap = .round; line.lineJoin = .round
-        chart.addSublayer(line)
-
-        let playhead = CALayer()
-        playhead.bounds = CGRect(x: 0, y: 0, width: max(2, size.width * 0.003), height: plot.height)
-        playhead.backgroundColor = cyan.withAlphaComponent(0.75).cgColor
-        let frames = animationFrames(samples: samples, videoDuration: videoDuration, sync: sync)
-        let positions = frames.map { frame -> NSValue in
-            let fraction = min(1, max(0, (frame.watchTime - first) / (last - first)))
-            let x = plot.minX + CGFloat(fraction) * plot.width
-            return NSValue(cgPoint: CGPoint(x: x, y: plot.midY))
-        }
-        if let firstPosition = positions.first { playhead.position = firstPosition.cgPointValue }
-        if let firstFrame = frames.first, let lastFrame = frames.last {
-            addDataVisibilityAnimation(to: playhead,
-                                       start: firstFrame.videoTime / max(0.001, videoDuration),
-                                       end: lastFrame.videoTime / max(0.001, videoDuration),
-                                       duration: videoDuration, key: "profile-playhead-visibility")
-        } else {
-            playhead.opacity = 0
-        }
-        if positions.count > 1 {
-            let move = CAKeyframeAnimation(keyPath: "position")
-            move.values = positions
-            move.keyTimes = frames.map { NSNumber(value: min(1, max(0, $0.videoTime / max(0.001, videoDuration)))) }
-            move.duration = videoDuration; move.beginTime = AVCoreAnimationBeginTimeAtZero
-            move.isRemovedOnCompletion = false; move.fillMode = .both
-            playhead.add(move, forKey: "depth-profile-playhead")
-        }
-        chart.addSublayer(playhead)
-    }
-
-    private func animationFrames(samples: [DiveSample], videoDuration: Double,
-                                 sync: TimelineSync) -> [(videoTime: Double, watchTime: Double)] {
-        samples.compactMap { sample in
-            let videoTime = sample.elapsedSeconds - sync.first.watchSeconds + sync.first.videoSeconds
-            guard videoTime >= 0, videoTime <= videoDuration else { return nil }
-            return (videoTime, sample.elapsedSeconds)
-        }.sorted { $0.videoTime < $1.videoTime }
+        let rate = (second.watchSeconds - sync.first.watchSeconds) / (second.videoSeconds - sync.first.videoSeconds)
+        return sync.first.videoSeconds + (watchTime - sync.first.watchSeconds) / rate
     }
 
     private func timeLabel(_ seconds: Double) -> String {
@@ -571,7 +479,7 @@ final class DiveVideoExporter {
         let transform = try await track.load(.preferredTransform)
         let rect = CGRect(origin: .zero, size: natural).applying(transform)
         let width = abs(rect.width), height = abs(rect.height)
-        guard max(width, height) >= 3840 else { throw DiveExportError.outputResolutionTooSmall }
+        guard ExportSizing.isFourKClass(CGSize(width: width, height: height)) else { throw DiveExportError.outputResolutionTooSmall }
         guard abs(width - expectedSize.width) < 4 && abs(height - expectedSize.height) < 4 else {
             throw DiveExportError.invalidMP4("預期 \(Int(expectedSize.width))×\(Int(expectedSize.height))，實際 \(Int(width))×\(Int(height))。")
         }
