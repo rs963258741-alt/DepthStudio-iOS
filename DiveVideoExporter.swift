@@ -290,10 +290,10 @@ final class DiveVideoExporter {
         let dynamic: (DiveReading) -> String
         switch id {
         case "hudBrand": fontSize = canvasSize.width * 0.027; color = muted; weight = .bold; staticText = "● FREEDIVE / MISSION 02"; dynamic = { _ in "FREEDIVE / MISSION 02" }
-        case "hudClock": fontSize = canvasSize.width * 0.030; color = white; weight = .semibold; staticText = "00:00"; dynamic = { timeLabel($0.elapsedSeconds) }
+        case "hudClock": fontSize = canvasSize.width * 0.030; color = white; weight = .semibold; staticText = "00:00"; dynamic = { self.timeLabel($0.elapsedSeconds) }
         case "depthValue": fontSize = canvasSize.width * 0.14; color = white; weight = .heavy; staticText = "--.-"; dynamic = { String(format: "%.1f", $0.depthMeters) }
         case "depthUnit": fontSize = canvasSize.width * 0.038; color = cyan; weight = .heavy; staticText = "M"; dynamic = { _ in "M" }
-        case "elapsedValue": fontSize = canvasSize.width * 0.055; color = white; weight = .heavy; staticText = "--:--"; dynamic = { timeLabel($0.elapsedSeconds) }
+        case "elapsedValue": fontSize = canvasSize.width * 0.055; color = white; weight = .heavy; staticText = "--:--"; dynamic = { self.timeLabel($0.elapsedSeconds) }
         case "elapsedLabel": fontSize = canvasSize.width * 0.023; color = muted; weight = .bold; staticText = "DIVE TIME"; dynamic = { _ in "DIVE TIME" }
         case "tempValue": fontSize = canvasSize.width * 0.055; color = white; weight = .heavy; staticText = "--"; dynamic = { $0.temperatureCelsius.map { String(format: "%.1f°", $0) } ?? "--" }
         case "tempLabel": fontSize = canvasSize.width * 0.023; color = muted; weight = .bold; staticText = "WATER TEMP"; dynamic = { _ in "WATER TEMP" }

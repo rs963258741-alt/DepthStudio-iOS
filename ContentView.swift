@@ -110,8 +110,7 @@ struct ContentView: View {
         .preferredColorScheme(.dark)
         .statusBarHidden(showingLaunchAnimation)
         .fileImporter(isPresented: $showingFileImporter,
-                      allowedContentTypes: fileImportKind == .video ? videoContentTypes : diveLogContentTypes,
-                      allowsMultipleSelection: false) { result in
+                      allowedContentTypes: fileImportKind == .video ? videoContentTypes : diveLogContentTypes) { result in
             guard let kind = fileImportKind else { return }
             fileImportKind = nil
             switch kind {
