@@ -100,6 +100,17 @@ class PackageVersionTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 package_ipa.validate_app(app, "1.0.3", "4")
 
+    def test_launch_storyboard_at_app_root_or_base_lproj(self):
+        import shutil
+        with tempfile.TemporaryDirectory() as temp:
+            app = self.make_app(Path(temp))
+            package_ipa.validate_app(app)  # Base.lproj/LaunchScreen.storyboardc
+            shutil.move(str(app / "Base.lproj" / "LaunchScreen.storyboardc"), str(app / "LaunchScreen.storyboardc"))
+            package_ipa.validate_app(app)  # app root, where Xcode puts this project's storyboard
+            shutil.rmtree(app / "LaunchScreen.storyboardc")
+            with self.assertRaises(ValueError):
+                package_ipa.validate_app(app)
+
     def test_ci_build_reads_versions_from_project_yml(self):
         script = (ROOT / "scripts" / "ci_build.sh").read_text(encoding="utf-8")
         project = (ROOT / "project.yml").read_text(encoding="utf-8")

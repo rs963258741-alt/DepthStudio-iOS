@@ -61,9 +61,14 @@ def validate_app(
         raise ValueError("CFBundleExecutable is missing or invalid")
     if launch_storyboard != "LaunchScreen":
         raise ValueError(f"UILaunchStoryboardName must be LaunchScreen, got {launch_storyboard!r}")
-    storyboard_compiled = app / "Base.lproj" / "LaunchScreen.storyboardc"
-    if not storyboard_compiled.is_dir():
-        raise ValueError("Compiled Base.lproj/LaunchScreen.storyboardc is missing")
+    # The storyboard sits at the project root (not in Base.lproj), so Xcode
+    # compiles it to the app root; accept the localized location as well.
+    storyboard_locations = (
+        app / "LaunchScreen.storyboardc",
+        app / "Base.lproj" / "LaunchScreen.storyboardc",
+    )
+    if not any(path.is_dir() for path in storyboard_locations):
+        raise ValueError("Compiled LaunchScreen.storyboardc is missing")
 
     executable = app / executable_name
     if not executable.is_file() or executable.stat().st_size == 0:
