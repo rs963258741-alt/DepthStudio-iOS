@@ -102,8 +102,14 @@ enum HUDLayerFactory {
         layer.masksToBounds = false
     }
 
-    /// Switch for layer caching (tests compare exports with and without it).
-    nonisolated(unsafe) static var allowsRasterization = true
+    /// Layer caching for static items. Off: the simulator cannot run the export compositor,
+    /// so its effect on the device renderer is unverified.
+    nonisolated(unsafe) static var allowsRasterization = false
+
+    /// Test hook: when set, the animation helpers apply the value at this video time
+    /// directly instead of adding animations, so an export HUD can be rendered as a still
+    /// image (CALayer.render(in:) ignores animations) and compared with the preview.
+    nonisolated(unsafe) static var stillTime: Double?
 
     /// Caches a layer that never changes, so it is not redrawn for every video frame.
     static func rasterize(_ layer: CALayer) {
@@ -121,6 +127,10 @@ enum HUDLayerFactory {
                                  duration: Double, key: String) {
         guard let first = values.first else { return }
         layer.string = first
+        if let time = stillTime, values.count == starts.count {
+            if let index = starts.lastIndex(where: { $0 <= time }) { layer.string = values[index] }
+            return
+        }
         guard values.count > 1, values.count == starts.count else { return }
         let total = max(0.001, duration)
         var keyTimes: [NSNumber] = [NSNumber(value: 0.0)]
@@ -156,6 +166,10 @@ enum HUDLayerFactory {
     static func addPositionAnimation(to layer: CALayer, times: [Double], duration: Double, key: String,
                                      position: (Double) -> CGPoint) {
         let total = max(0.001, duration)
+        if let time = stillTime {
+            layer.position = position(min(total, max(0, time)))
+            return
+        }
         let clamped = Array(Set(([0, total] + times).map { min(total, max(0, $0)) })).sorted()
         layer.position = position(0)
         guard clamped.count > 1 else { return }
@@ -173,6 +187,10 @@ enum HUDLayerFactory {
     /// Shows `layer` only from `start` to `end` (video seconds), like the preview hides
     /// live values outside the recorded dive.
     static func addVisibility(to layer: CALayer, start: Double, end: Double, duration: Double, key: String) {
+        if let time = stillTime {
+            layer.opacity = (time >= start && time <= end) ? 1 : 0
+            return
+        }
         let total = max(0.001, duration)
         let s = min(1, max(0, start / total))
         let e = min(1, max(s, end / total))

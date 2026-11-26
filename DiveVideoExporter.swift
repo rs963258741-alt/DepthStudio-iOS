@@ -214,6 +214,9 @@ final class DiveVideoExporter {
         instruction.layerInstructions = [layerInstruction]
         composition.instructions = [instruction]
 
+        // With every HUD item hidden there is nothing to draw: skip the Core Animation pass.
+        guard let items = hud.sublayers, !items.isEmpty else { return composition }
+
         let parent = CALayer()
         parent.frame = CGRect(origin: .zero, size: renderSize)
         parent.isGeometryFlipped = true
@@ -242,7 +245,7 @@ final class DiveVideoExporter {
         var live: ((DiveReading) -> String)? = nil
     }
 
-    private func makeHUDLayer(
+    func makeHUDLayer(
         size: CGSize,
         samples: [DiveSample],
         maximumDepth: Double,

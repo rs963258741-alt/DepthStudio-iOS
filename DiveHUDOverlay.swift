@@ -151,26 +151,33 @@ struct DiveHUDOverlay: View {
     }
 
     /// Drag in screen coordinates, so scaled or rotated items still follow the finger.
+    /// The end event applies the final translation too: a quick flick can arrive as a
+    /// single end event without any change events.
     private func dragGesture(id: String, size: CGSize) -> some Gesture {
         DragGesture(minimumDistance: 2, coordinateSpace: .global)
-            .onChanged { value in
-                guard isEditing, size.width > 0, size.height > 0 else { return }
-                selectedItem = id
-                if dragOrigins[id] == nil {
-                    dragOrigins[id] = settings.positions[id] ?? HUDPoint(x: 50, y: 50)
-                }
-                guard let origin = dragOrigins[id] else { return }
-                var x = origin.x + Double(value.translation.width / size.width * 100)
-                var y = origin.y + Double(value.translation.height / size.height * 100)
-                // Match the web editor's centre-to-centre snapping threshold (2% of stage).
-                for other in HUDItemDefinition.all where other.id != id && (settings.visibility[other.id] ?? true) {
-                    guard let otherPoint = settings.positions[other.id] else { continue }
-                    if abs(x - otherPoint.x) < 2 { x = otherPoint.x }
-                    if abs(y - otherPoint.y) < 2 { y = otherPoint.y }
-                }
-                settings.positions[id] = HUDPoint(x: min(99, max(1, x)), y: min(99, max(1, y)))
+            .onChanged { value in moveItem(id, by: value.translation, size: size) }
+            .onEnded { value in
+                moveItem(id, by: value.translation, size: size)
+                dragOrigins[id] = nil
             }
-            .onEnded { _ in dragOrigins[id] = nil }
+    }
+
+    private func moveItem(_ id: String, by translation: CGSize, size: CGSize) {
+        guard isEditing, size.width > 0, size.height > 0 else { return }
+        selectedItem = id
+        if dragOrigins[id] == nil {
+            dragOrigins[id] = settings.positions[id] ?? HUDPoint(x: 50, y: 50)
+        }
+        guard let origin = dragOrigins[id] else { return }
+        var x = origin.x + Double(translation.width / size.width * 100)
+        var y = origin.y + Double(translation.height / size.height * 100)
+        // Match the web editor's centre-to-centre snapping threshold (2% of stage).
+        for other in HUDItemDefinition.all where other.id != id && (settings.visibility[other.id] ?? true) {
+            guard let otherPoint = settings.positions[other.id] else { continue }
+            if abs(x - otherPoint.x) < 2 { x = otherPoint.x }
+            if abs(y - otherPoint.y) < 2 { y = otherPoint.y }
+        }
+        settings.positions[id] = HUDPoint(x: min(99, max(1, x)), y: min(99, max(1, y)))
     }
 
     @ViewBuilder

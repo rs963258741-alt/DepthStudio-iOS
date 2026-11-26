@@ -41,7 +41,8 @@ final class HUDLayoutUITests: XCTestCase {
 
     private func drag(_ element: XCUIElement, dx: CGFloat, dy: CGFloat) {
         let start = element.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-        start.press(forDuration: 0.3, thenDragTo: start.withOffset(CGVector(dx: dx, dy: dy)))
+        start.press(forDuration: 0.3, thenDragTo: start.withOffset(CGVector(dx: dx, dy: dy)),
+                    withVelocity: .slow, thenHoldForDuration: 0.2)
     }
 
     /// Drags each field and checks it moved; records every result (and a screenshot for
