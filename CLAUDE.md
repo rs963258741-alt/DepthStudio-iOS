@@ -75,6 +75,11 @@ GitHub 的 macOS runner 曾整段時間拿不到機器（job 排隊 15 分鐘後
 - `AppTests/`（XCTest）：泳池計算、輸出尺寸、預設排版、實際輸出 4K 影片並與預覽比對；圖片寫到 `build/test-artifacts/*-preview-vs-export.png`。
 - `AppUITests/`（XCUITest）：拖曳每個 HUD 欄位、排版開關、設為預設後恢復。
 - 執行：`scripts/ci_test.sh`；Codemagic workflow `depth-studio-tests`（`POST /builds` 的 `workflowId`）。修改 HUD、輸出或排版相關程式後都要跑一次，並下載比對圖檢查。
+- 模擬器的限制（已查證，不是程式錯誤）：
+  - `AVVideoCompositionCoreAnimationTool` 在模擬器會當機（IOSurface 配置失敗，連空白 HUD 也一樣）。因此測試在沒有 HUD 時實際輸出（驗證尺寸、裁切、進度與 MP4 檢查），HUD 本身則用 `HUDLayerFactory.stillTime` 產生靜態畫面，並與 SwiftUI 預覽並排比對；含 HUD 的完整輸出測試只在實機執行。
+  - Vision 光流（`VNGenerateOpticalFlowRequest`）在模擬器無法建立，AI 分析測試在模擬器上會 skip。
+- UI 測試要點：預覽舞台比螢幕下半部還長，拖曳下方欄位前要先捲動（`bringIntoView`）；HUD 欄位只用一個 `highPriorityGesture(DragGesture(minimumDistance: 0))` 同時處理選取與拖曳（另外的 tap 手勢會把短距離拖曳吃掉）。
+- 結果下載：`GET /builds/<id>` 的 `artefacts[].url`（zip 內含 `build/test-summary.txt`、`build/test-artifacts/*.png`、`*-results.json`、當機時的 `.ips`）。
 
 ## 使用者端安裝（AltStore）
 
