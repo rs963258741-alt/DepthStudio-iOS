@@ -1,30 +1,41 @@
-DepthStudio-iOS — IPA Auto-Build package
+DepthStudio-iOS — V8.18 Native Parity / Full-screen Launch / IPA Auto-Build
 
-This is a full project snapshot based on the current main branch of:
-https://github.com/rs963258741-alt/DepthStudio-iOS
+App version: 1.0.3
+Build number: 4
+Feature baseline: user-supplied DepthStudio_WebPreview_V8_18(2).zip
 
-What changed in this package:
-- codemagic.yaml only: after Xcode builds the unsigned .app, the workflow validates it and packages build/DepthStudio.ipa with the standard Payload/<App>.app structure.
-- The workflow publishes build/DepthStudio.ipa as a Codemagic artifact.
-- Existing Swift source, AppIcon asset catalog, project.yml, FIT/UDDF support, and web files are retained from the current repository snapshot.
+What this package contains:
+- Native iOS UI aligned with the V8.18 web feature set (15 HUD items, editing, visibility, identity, sync, preview and 4K MP4 output).
+- Direct iPhone Photos video picker plus Files-app fallback.
+- Existing Garmin FIT SDK parser and ATMOS UDDF/XML parser.
+- Supplied white/silver Jiaoliu logo on transparent background, shown small in the main header and intro animation.
+- Native LaunchScreen.storyboard to address the 2:3 letterboxed app view seen in the supplied iPhone recording.
+- Codemagic Release workflow with bundle/version/ARM64/launch-screen checks and AltStore-compatible Payload ZIP packaging.
 
 Upload guidance:
 1. Extract this ZIP.
 2. Upload the CONTENTS of the DepthStudio-iOS folder to the ROOT of the DepthStudio-iOS GitHub repository (main branch), replacing same-named files.
-3. Do NOT upload this package to the web DepthStudio repository.
+3. Do NOT upload this package to the separate web DepthStudio repository.
 4. Commit the changes.
-5. Run the existing workflow: Depth Studio · unsigned iOS build + IPA.
-6. Download build/DepthStudio.ipa from Codemagic artifacts.
+5. Run the workflow named: Depth Studio · V8.18 Native Parity + Fullscreen Launch + AltStore IPA.
+6. Download only build/DepthStudio.ipa from Codemagic artifacts.
 
 Signing note:
-The IPA is intentionally unsigned. Import it into AltStore, which will sign it with the Apple ID configured in AltStore. It is not an App Store distribution IPA.
+The IPA is intentionally unsigned at build time. Import it into AltStore, which signs it with the Apple ID configured in AltStore. It is not an App Store distribution IPA.
 
 Privacy note:
-Before uploading, check GitHub repository Settings > General > Danger Zone > Change repository visibility. The repository visibility observed by the connected GitHub service at packaging time was Public. Change it to Private if you intend to keep the source private.
+The connected GitHub service previously reported this repository as Public. Before upload, verify Settings > General > Danger Zone > Change repository visibility and set it to Private if you want the source private.
 
-Validation performed locally:
-- YAML parsed successfully.
-- The package script passed bash syntax validation.
-- Icon asset JSON parsed successfully.
-- AppIcon.png verified as a 1024x1024 PNG.
-- This environment cannot run Xcode, so a successful Codemagic build and iPhone install still need to be confirmed.
+Validation performed locally for this package:
+- 14 Python tests passed (native feature wiring, V8.18 parity and IPA structure/metadata validation).
+- 9 web FIT importer tests passed.
+- Swift frontend syntax parse passed for all 10 Swift files.
+- Python packaging script bytecode compile passed.
+- Codemagic YAML and every shell script passed syntax validation.
+- LaunchScreen storyboard XML and XcodeGen source/Info.plist declarations passed structural checks.
+- Asset-catalog JSON and logo/flag PNG dimensions/alpha checks passed.
+- The supplied web source files copied into this repository remain byte-for-byte unchanged.
+- Mock app-bundle-to-IPA packaging passed end-to-end.
+
+Limitations:
+This environment does not contain Apple Xcode/iOS SDK. Static checks do not replace an actual Codemagic Xcode build or iPhone test. PhotosPicker provider behaviour, full-device screen sizing, intro animation rendering, FIT/UDDF real-file import and 4K MP4 export/save-to-Photos must be verified on the next iPhone build.

@@ -1,0 +1,132 @@
+name: iOS build → AltStore
+
+# Every push to main or a claude/** branch:
+#   1. runs the Python/Node tests on Linux,
+#   2. builds the unsigned iOS app on a GitHub macOS runner (scripts/ci_build.sh),
+#   3. publishes a GitHub Release with DepthStudio.ipa and altstore-source.json.
+# AltStore reads the newest release through
+#   https://github.com/<owner>/<repo>/releases/latest/download/altstore-source.json
+
+on:
+  push:
+    branches: [main, "claude/**"]
+    paths-ignore:
+      - "**.md"
+      - "**.txt"
+      - "**.diff"
+  workflow_dispatch:
+    inputs:
+      notes:
+        description: "What changed (shown in AltStore)"
+        required: false
+        default: ""
+      publish:
+        description: "Publish a GitHub Release for AltStore"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ios-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Tests (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - name: Python tests
+        run: python3 -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Node FIT importer tests
+        run: node --test tests/fit-import.test.mjs
+      - name: Script syntax
+        run: |
+          python3 -m py_compile scripts/*.py
+          bash -n scripts/ci_build.sh
+
+  build:
+    name: Build IPA (macOS)
+    needs: checks
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Build and package
+        run: |
+          # Build numbers keep rising with every run, so AltStore always sees an update.
+          export APP_BUILD_NUMBER=$((GITHUB_RUN_NUMBER + 100))
+          bash scripts/ci_build.sh
+
+      - name: Keep IPA and build log
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: DepthStudio-run-${{ github.run_number }}
+          path: |
+            build/DepthStudio.ipa
+            build/xcodebuild-release.log
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Publish release for AltStore
+        if: success() && (github.event_name == 'push' || inputs.publish)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NOTES_INPUT: ${{ inputs.notes }}
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          set -euo pipefail
+          source build/build-info.env
+
+          TAG="v${APP_VERSION}-build.${APP_BUILD_NUMBER}"
+          REPO_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}"
+          IPA_URL="${REPO_URL}/releases/download/${TAG}/DepthStudio.ipa"
+          SOURCE_URL="${REPO_URL}/releases/latest/download/altstore-source.json"
+          ICON_URL="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${GITHUB_SHA}/Assets.xcassets/AppIcon.appiconset/AppIcon.png"
+
+          # Release notes: the manual input, else the commit message without git trailers.
+          NOTES="${NOTES_INPUT:-}"
+          if [[ -z "$NOTES" ]]; then
+            NOTES="$(printf '%s\n' "${COMMIT_MESSAGE:-Manual build}" | sed -E '/^(Co-Authored-By|Claude-Session|Signed-off-by):/d')"
+          fi
+
+          python3 scripts/make_altstore_source.py \
+            --ipa build/DepthStudio.ipa \
+            --download-url "$IPA_URL" \
+            --icon-url "$ICON_URL" \
+            --website "$REPO_URL" \
+            --notes "$NOTES" \
+            --output build/altstore-source.json
+
+          {
+            printf '%s\n\n' "$NOTES"
+            echo "---"
+            echo "**Version** ${APP_VERSION} (build ${APP_BUILD_NUMBER}) · branch \`${GITHUB_REF_NAME}\` · commit ${GITHUB_SHA::7}"
+            echo
+            echo "**Install with AltStore:** add this source once in AltStore → Sources → +"
+            echo
+            echo "\`${SOURCE_URL}\`"
+            echo
+            echo "Or open this page in Safari on the iPhone, download DepthStudio.ipa, and share it to AltStore."
+          } > build/release-notes.md
+
+          gh release create "$TAG" \
+            build/DepthStudio.ipa \
+            build/altstore-source.json \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Depth Studio ${APP_VERSION} (build ${APP_BUILD_NUMBER})" \
+            --notes-file build/release-notes.md \
+            --latest
+
+          {
+            echo "### ✅ Depth Studio ${APP_VERSION} (build ${APP_BUILD_NUMBER})"
+            echo "- Release: ${REPO_URL}/releases/tag/${TAG}"
+            echo "- IPA: ${IPA_URL}"
+            echo "- AltStore source: \`${SOURCE_URL}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
