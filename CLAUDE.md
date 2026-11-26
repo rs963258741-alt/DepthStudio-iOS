@@ -15,6 +15,10 @@
 - 啟動流程：`DepthStudioRootView`（`ContentView.swift`）→ 啟動動畫 → `ModeSelectionView` 選模式 → 深度潛水 `ContentView` 或泳池平潛 `PoolModeView`。兩種模式各自獨立的介面。
 - 泳池平潛（V1 基礎模式）：`PoolTimeline.swift`（泳池長度、時間節點、距離插值、分段平均速率、趟次）、`PoolHUDSettings.swift`（16 個 HUD 欄位）、`PoolHUDOverlay.swift`（預覽 HUD 與距離／速率雙曲線）、`PoolVideoHUDLayer.swift`（輸出用 Core Animation HUD）、`PoolModeView.swift`（畫面）。輸出共用 `DiveVideoExporter.exportVideo`（4K、音訊、MP4 驗證）。
 - 泳池平潛下一階段（尚未實作）：AI 人體與背景追蹤、浮動速率、任意時間點距離校正（V1.1／V1.2），踢動頻率與滑行效率（V2.0）。
+- 共用元件（`StudioShared.swift`）：`OutputAspect`（原始／1:1／4:5／9:16／16:9）、`ExportSizing`（每種版型都是 3840×2160 的像素量，9:16 = 2160×3840）、`HUDMetrics`（HUD 尺寸以畫面短邊為基準，預覽與輸出共用）、`PlaybackController`（@Observable，只有讀取時間的子 View 會在播放時重繪）、`PlayerLayerView`（aspect-fill，與輸出的置中裁切相同）、浮動「預覽影像」、`ExportProgressClock`（剩餘時間）、`HUDLayoutPresetStore`（「將目前排版設為預設」）。
+- 輸出 HUD 一律用 `HUDLayerFactory.swift` 建 layer：`contentsScale = 1`、文字垂直置中、線寬與虛線用 `HUDMetrics.point`。圖表幾何用 `DepthProfileGeometry`／`PoolProfileGeometry`，預覽與輸出共用，修改時兩邊一起看。
+- HUD 欄位的手勢必須加在 `.position()` 之前（否則觸控範圍變成整個畫面），並用 `.allowsHitTesting(isEditing)`。
+- 泳池平潛速率：`PoolTimeline` 以 0.1 秒為單位的速率曲線，各段距離固定等於標記；`PoolMotionAnalyzer`（Vision 光流＋人體／顯著物偵測）提供 AI 形狀，否則為 ±0.22 m/s 內的模擬浮動。
 - `project.yml` 的 `sources:` 是**逐檔列出**。新增 Swift 檔／資源時必須同步加進去，否則不會被編譯。
 - 依賴：Garmin FIT Objective-C SDK（Swift Package，鎖定 revision）。
 - Bundle ID：`com.bananaflow.depthstudio`；最低 iOS 17；只支援 iPhone。
@@ -65,6 +69,12 @@ GitHub 的 macOS runner 曾整段時間拿不到機器（job 排隊 15 分鐘後
 4. 成功後建立公開下載連結：`POST <artefact url>/public-url`，body `{"expiresAt": <unix 秒>}`。
 5. 以該連結觸發 `.github/workflows/publish-ipa.yml`（Linux，`workflow_dispatch`，inputs：`ipa_url`、`notes`、`built_by`），它會檢查 IPA、產生 AltStore source 並發佈 Release（標為 latest），AltStore 即可更新。
 6. Codemagic 的 build number = Codemagic 編號 + 1000（見 `codemagic.yaml`）。
+
+### 自動測試（iPhone 模擬器）
+
+- `AppTests/`（XCTest）：泳池計算、輸出尺寸、預設排版、實際輸出 4K 影片並與預覽比對；圖片寫到 `build/test-artifacts/*-preview-vs-export.png`。
+- `AppUITests/`（XCUITest）：拖曳每個 HUD 欄位、排版開關、設為預設後恢復。
+- 執行：`scripts/ci_test.sh`；Codemagic workflow `depth-studio-tests`（`POST /builds` 的 `workflowId`）。修改 HUD、輸出或排版相關程式後都要跑一次，並下載比對圖檢查。
 
 ## 使用者端安裝（AltStore）
 
