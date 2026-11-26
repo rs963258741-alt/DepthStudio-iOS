@@ -110,7 +110,7 @@ LAUNCH_STORYBOARD="$(plist UILaunchStoryboardName)"
 
 [[ "$BUNDLE_ID" == "$EXPECTED_BUNDLE_ID" ]] || { echo "ERROR: Unexpected Bundle ID: $BUNDLE_ID"; exit 1; }
 [[ "$LAUNCH_STORYBOARD" == "LaunchScreen" ]] || { echo "ERROR: Launch storyboard is not configured"; exit 1; }
-[[ -d "$APP_PATH/Base.lproj/LaunchScreen.storyboardc" ]] || { echo "ERROR: LaunchScreen storyboard was not compiled into the app"; exit 1; }
+[[ -d "$APP_PATH/LaunchScreen.storyboardc" || -d "$APP_PATH/Base.lproj/LaunchScreen.storyboardc" ]] || { echo "ERROR: LaunchScreen storyboard was not compiled into the app"; exit 1; }
 [[ -s "$APP_PATH/$EXECUTABLE" ]] || { echo "ERROR: App executable missing or empty"; exit 1; }
 [[ -s "$APP_PATH/Assets.car" ]] || { echo "ERROR: Assets.car missing or empty"; exit 1; }
 [[ -d "$APP_PATH/FIT_cppfit.bundle" ]] || { echo "ERROR: FIT_cppfit.bundle missing"; exit 1; }
