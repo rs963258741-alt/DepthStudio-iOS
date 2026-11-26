@@ -1,6 +1,6 @@
 workflows:
   depth-studio-unsigned-ios:
-    name: Depth Studio · unsigned iOS Release + IPA
+    name: Depth Studio · V8.18 Native Parity + Fullscreen Launch + AltStore IPA
     max_build_duration: 60
     instance_type: mac_mini_m2
     environment:
@@ -37,28 +37,25 @@ workflows:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             build 2>&1 | tee build/xcodebuild-release.log
-      - name: Validate app bundle and package IPA
+      - name: Validate app bundle and create AltStore-compatible IPA
         script: |
           set -euo pipefail
 
-          APP_PATH="build/DerivedData/Build/Products/Release-iphoneos/Depth Studio.app"
-          PLIST="$APP_PATH/Info.plist"
-          APP_VERSION="1.0.0"
-          APP_BUILD_VERSION="1"
+          APP_DIR="build/DerivedData/Build/Products/Release-iphoneos"
+          APP_PATH="$(find "$APP_DIR" -maxdepth 1 -type d -name '*.app' -print -quit)"
+          APP_VERSION="1.0.3"
+          APP_BUILD_VERSION="4"
 
-          if [[ ! -d "$APP_PATH" ]]; then
-            echo "ERROR: Expected app bundle not found: $APP_PATH"
+          if [[ -z "$APP_PATH" || ! -d "$APP_PATH" ]]; then
+            echo "ERROR: No .app bundle found in $APP_DIR"
             exit 1
           fi
-          if [[ ! -f "$PLIST" ]]; then
-            echo "ERROR: Info.plist missing from app bundle"
-            exit 1
-          fi
+
+          PLIST="$APP_PATH/Info.plist"
+          [[ -f "$PLIST" ]] || { echo "ERROR: Info.plist missing"; exit 1; }
           /usr/bin/plutil -lint "$PLIST"
 
-          # Some XcodeGen/Xcode combinations omit these generated Info.plist keys
-          # even when INFOPLIST_KEY_* is present. Ensure both installer-required
-          # version strings exist before validation and IPA packaging.
+          # Guarantee installer metadata even if XcodeGen changes generated keys.
           if /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PLIST" >/dev/null 2>&1; then
             /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $APP_VERSION" "$PLIST"
           else
@@ -72,56 +69,34 @@ workflows:
 
           BUNDLE_ID=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$PLIST")
           EXECUTABLE=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$PLIST")
+          LAUNCH_STORYBOARD=$(/usr/libexec/PlistBuddy -c 'Print :UILaunchStoryboardName' "$PLIST")
           SHORT_VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PLIST")
           BUILD_VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$PLIST")
 
           [[ "$BUNDLE_ID" == "com.bananaflow.depthstudio" ]] || { echo "ERROR: Unexpected Bundle ID: $BUNDLE_ID"; exit 1; }
           [[ "$SHORT_VERSION" == "$APP_VERSION" ]] || { echo "ERROR: Unexpected app version: $SHORT_VERSION"; exit 1; }
           [[ "$BUILD_VERSION" == "$APP_BUILD_VERSION" ]] || { echo "ERROR: Unexpected build version: $BUILD_VERSION"; exit 1; }
+          [[ "$LAUNCH_STORYBOARD" == "LaunchScreen" ]] || { echo "ERROR: Launch storyboard is not configured"; exit 1; }
+          [[ -d "$APP_PATH/Base.lproj/LaunchScreen.storyboardc" ]] || { echo "ERROR: Full-screen LaunchScreen storyboard was not compiled into the app"; exit 1; }
           [[ -s "$APP_PATH/$EXECUTABLE" ]] || { echo "ERROR: App executable missing or empty"; exit 1; }
           [[ -s "$APP_PATH/Assets.car" ]] || { echo "ERROR: Assets.car missing or empty"; exit 1; }
           [[ -d "$APP_PATH/FIT_cppfit.bundle" ]] || { echo "ERROR: FIT_cppfit.bundle missing"; exit 1; }
 
+          ARCHS="$(xcrun lipo -archs "$APP_PATH/$EXECUTABLE")"
+          echo "App executable architectures: $ARCHS"
+          [[ " $ARCHS " == *" arm64 "* ]] || { echo "ERROR: iPhone arm64 architecture missing"; exit 1; }
+
           echo "Validated Bundle ID: $BUNDLE_ID"
           echo "Validated app version: $SHORT_VERSION ($BUILD_VERSION)"
           echo "Validated executable: $EXECUTABLE"
+          echo "Validated launch storyboard: $LAUNCH_STORYBOARD"
 
-          REPO_ROOT="$PWD"
-          IPA_WORK="$REPO_ROOT/build/ipa-work"
-          IPA_PATH="$REPO_ROOT/build/DepthStudio.ipa"
-          rm -rf "$IPA_WORK" "$IPA_PATH"
-          mkdir -p "$IPA_WORK/Payload"
-          APP_NAME="$(basename "$APP_PATH")"
-          ditto "$APP_PATH" "$IPA_WORK/Payload/$APP_NAME"
+          python3 scripts/package_ipa.py \
+            --app "$APP_PATH" \
+            --output "build/DepthStudio.ipa"
 
-          # Payload must be at the ZIP root. Keep Apple's ditto archive handling
-          # so bundle metadata and resource forks are preserved.
-          /usr/bin/ditto -c -k --sequesterRsrc --keepParent \
-            "$IPA_WORK/Payload" "$IPA_PATH"
-
-          [[ -s "$IPA_PATH" ]] || { echo "ERROR: IPA file was not created"; exit 1; }
-          /usr/bin/unzip -t "$IPA_PATH"
-
-          IPA_CHECK="$REPO_ROOT/build/ipa-check"
-          rm -rf "$IPA_CHECK"
-          mkdir -p "$IPA_CHECK"
-          /usr/bin/unzip -q "$IPA_PATH" -d "$IPA_CHECK"
-          CHECK_APP="$IPA_CHECK/Payload/Depth Studio.app"
-          CHECK_PLIST="$CHECK_APP/Info.plist"
-          [[ -f "$CHECK_PLIST" ]] || { echo "ERROR: IPA is missing Payload/Depth Studio.app/Info.plist"; exit 1; }
-          [[ -s "$CHECK_APP/$EXECUTABLE" ]] || { echo "ERROR: IPA is missing app executable"; exit 1; }
-          [[ -s "$CHECK_APP/Assets.car" ]] || { echo "ERROR: IPA is missing Assets.car"; exit 1; }
-          [[ -d "$CHECK_APP/FIT_cppfit.bundle" ]] || { echo "ERROR: IPA is missing FIT_cppfit.bundle"; exit 1; }
-          CHECK_VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$CHECK_PLIST")
-          CHECK_BUILD=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$CHECK_PLIST")
-          CHECK_BUNDLE_ID=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$CHECK_PLIST")
-          [[ "$CHECK_VERSION" == "$APP_VERSION" && "$CHECK_BUILD" == "$APP_BUILD_VERSION" ]] || { echo "ERROR: Version metadata did not survive IPA packaging"; exit 1; }
-          [[ "$CHECK_BUNDLE_ID" == "com.bananaflow.depthstudio" ]] || { echo "ERROR: Bundle ID did not survive IPA packaging"; exit 1; }
-
-          echo "SUCCESS: build/DepthStudio.ipa is a validated, unsigned Release IPA."
-          /usr/bin/unzip -l "$IPA_PATH" | grep -F 'Payload/Depth Studio.app/Info.plist'
-          rm -rf "$IPA_CHECK" "$IPA_WORK"
+          [[ -s build/DepthStudio.ipa ]] || { echo "ERROR: IPA output missing"; exit 1; }
+          echo "SUCCESS: build/DepthStudio.ipa passed bundle, ARM64 and archive validation."
     artifacts:
       - build/DepthStudio.ipa
       - build/xcodebuild-release.log
-      - build/DerivedData/Build/Products/Release-iphoneos/*.app

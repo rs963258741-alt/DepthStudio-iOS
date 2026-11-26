@@ -2,21 +2,18 @@ import SwiftUI
 import AVKit
 import Combine
 
-/// Connects AVPlayer playback time to the watch timeline and the HUD.
-/// Requires DiveSample, DiveDataInterpolator, TimelineSync and DiveHUDOverlay.
 @MainActor
 final class DivePlayerClock: ObservableObject {
     @Published private(set) var currentVideoTime: Double = 0
     @Published private(set) var duration: Double = 0
+    @Published private(set) var isPlaying = false
 
     private let player: AVPlayer
     private var observer: Any?
+    private var statusObserver: AnyCancellable?
 
     init(player: AVPlayer) {
         self.player = player
-        self.duration = player.currentItem?.duration.seconds.isFinite == true
-            ? max(0, player.currentItem!.duration.seconds) : 0
-
         observer = player.addPeriodicTimeObserver(
             forInterval: CMTime(seconds: 1.0 / 15.0, preferredTimescale: 600),
             queue: .main
@@ -28,19 +25,28 @@ final class DivePlayerClock: ObservableObject {
                     let seconds = item.duration.seconds
                     self.duration = seconds.isFinite ? max(0, seconds) : 0
                 }
+                self.isPlaying = self.player.timeControlStatus == .playing
             }
         }
+        statusObserver = player.publisher(for: \.timeControlStatus)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] status in
+                Task { @MainActor in self?.isPlaying = status == .playing }
+            }
     }
 
     func seek(to seconds: Double) {
         let safe = min(max(0, seconds), max(duration, 0))
-        player.seek(to: CMTime(seconds: safe, preferredTimescale: 600),
-                    toleranceBefore: .zero,
-                    toleranceAfter: .zero)
+        player.seek(to: CMTime(seconds: safe, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+    }
+
+    func togglePlayback() {
+        if player.timeControlStatus == .playing { player.pause() } else { player.play() }
     }
 
     deinit {
         if let observer { player.removeTimeObserver(observer) }
+        statusObserver?.cancel()
     }
 }
 
@@ -49,122 +55,71 @@ struct DiveVideoPreview: View {
     let samples: [DiveSample]
     let sync: TimelineSync
     let maximumDepth: Double
+    let deviceName: String
+    @Binding var settings: HUDSettings
+    @Binding var selectedHUDItem: String
+    let isEditing: Bool
 
     @StateObject private var clock: DivePlayerClock
-    @State private var hudOpacity = 0.88
-    @State private var hudScale = 1.0
-    @State private var hudOffset = CGSize.zero
-    @State private var dragOrigin = CGSize.zero
 
-    private var interpolator: DiveDataInterpolator? {
-        try? DiveDataInterpolator(samples: samples)
+    private var reading: DiveReading? {
+        guard let interpolator = try? DiveDataInterpolator(samples: samples) else { return nil }
+        return interpolator.reading(at: sync.watchTime(forVideoTime: clock.currentVideoTime))
     }
 
-    private var watchTime: Double {
-        sync.watchTime(forVideoTime: clock.currentVideoTime)
-    }
-
-    private var currentReading: DiveReading? {
-        interpolator?.reading(at: watchTime)
-    }
-
-    init(player: AVPlayer, samples: [DiveSample],
-         sync: TimelineSync, maximumDepth: Double) {
+    init(player: AVPlayer, samples: [DiveSample], sync: TimelineSync,
+         maximumDepth: Double, deviceName: String,
+         settings: Binding<HUDSettings>, selectedHUDItem: Binding<String>, isEditing: Bool) {
         self.player = player
         self.samples = samples
         self.sync = sync
         self.maximumDepth = maximumDepth
+        self.deviceName = deviceName
+        self._settings = settings
+        self._selectedHUDItem = selectedHUDItem
+        self.isEditing = isEditing
         _clock = StateObject(wrappedValue: DivePlayerClock(player: player))
     }
 
     var body: some View {
-        VStack(spacing: 0) {
+        VStack(spacing: 12) {
             ZStack {
+                Color.black
                 VideoPlayer(player: player)
-                    .background(.black)
-
-                GeometryReader { geometry in
-                    DiveHUDOverlay(
-                        reading: currentReading,
-                        samples: samples,
-                        videoTime: clock.currentVideoTime,
-                        totalVideoDuration: clock.duration,
-                        maximumDepth: maximumDepth
-                    )
-                    .opacity(hudOpacity)
-                    .scaleEffect(hudScale)
-                    .frame(maxWidth: min(geometry.size.width * 0.96, 900))
-                    .fixedSize(horizontal: false, vertical: true)
-                    .position(
-                        x: geometry.size.width / 2 + hudOffset.width,
-                        y: geometry.size.height * 0.78 + hudOffset.height
-                    )
-                    .gesture(
-                        DragGesture()
-                            .onChanged { value in
-                                hudOffset = CGSize(
-                                    width: dragOrigin.width + value.translation.width,
-                                    height: dragOrigin.height + value.translation.height
-                                )
-                            }
-                            .onEnded { _ in dragOrigin = hudOffset }
-                    )
-                }
-                .allowsHitTesting(true)
+                    .background(Color.black)
+                DiveHUDOverlay(
+                    reading: reading,
+                    samples: samples,
+                    maximumDepth: maximumDepth,
+                    deviceName: deviceName,
+                    settings: $settings,
+                    selectedItem: $selectedHUDItem,
+                    isEditing: isEditing
+                )
             }
-            .aspectRatio(contentMode: .fit)
-            .clipped()
+            .aspectRatio(9.0 / 16.0, contentMode: .fit)
+            .frame(maxWidth: .infinity)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.cyan.opacity(0.25), lineWidth: 1))
 
-            VStack(spacing: 10) {
-                HStack(spacing: 14) {
-                    Button {
-                        if player.timeControlStatus == .playing {
-                            player.pause()
-                        } else {
-                            player.play()
-                        }
-                    } label: {
-                        Image(systemName: player.timeControlStatus == .playing
-                              ? "pause.fill" : "play.fill")
-                            .font(.title3)
-                            .frame(width: 38, height: 38)
-                    }
-                    .buttonStyle(.bordered)
-
-                    Slider(
-                        value: Binding(
-                            get: { clock.currentVideoTime },
-                            set: { clock.seek(to: $0) }
-                        ),
-                        in: 0...max(clock.duration, 0.1)
-                    )
-
-                    Text("\(timeLabel(clock.currentVideoTime)) / \(timeLabel(clock.duration))")
-                        .font(.system(.caption, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .fixedSize()
+            HStack(spacing: 12) {
+                Button { clock.togglePlayback() } label: {
+                    Image(systemName: clock.isPlaying ? "pause.fill" : "play.fill")
+                        .font(.headline).frame(width: 40, height: 40)
                 }
+                .buttonStyle(.bordered)
+                .tint(Color.cyan)
 
-                HStack {
-                    Label("HUD 透明度", systemImage: "circle.lefthalf.filled")
-                    Slider(value: $hudOpacity, in: 0.25...1.0)
-                    Text("\(Int(hudOpacity * 100))%")
-                        .monospacedDigit()
-                        .frame(width: 42, alignment: .trailing)
-                }
+                Slider(value: Binding(get: { clock.currentVideoTime }, set: { clock.seek(to: $0) }),
+                       in: 0...max(clock.duration, 0.1))
+                    .tint(Color.cyan)
 
-                HStack {
-                    Label("HUD 大小", systemImage: "arrow.up.left.and.arrow.down.right")
-                    Slider(value: $hudScale, in: 0.65...1.35)
-                    Text("\(Int(hudScale * 100))%")
-                        .monospacedDigit()
-                        .frame(width: 42, alignment: .trailing)
-                }
+                Text("\(timeLabel(clock.currentVideoTime)) / \(timeLabel(clock.duration))")
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .fixedSize()
             }
-            .padding()
-            .background(.ultraThinMaterial)
         }
-        .background(.black)
     }
 
     private func timeLabel(_ seconds: Double) -> String {
