@@ -55,6 +55,17 @@ python3 -m py_compile scripts/*.py && bash -n scripts/ci_build.sh
 3. 失敗時：`mcp__github__get_job_logs`（`run_id`、`failed_only: true`、`return_content: true`、`tail_lines: 300`），從 `BUILD FAILURE SUMMARY` 找到錯誤，修正後再 commit/push。
 4. 成功時：用 `mcp__github__list_releases` 取得最新 Release，回報給使用者：版本、變更摘要、Release 連結，以及 AltStore 更新方式。
 
+### 備援：GitHub macOS 無法使用時改用 Codemagic（Claude 可直接操作）
+
+GitHub 的 macOS runner 曾整段時間拿不到機器（job 排隊 15 分鐘後被取消）。此時：
+
+1. Codemagic API 金鑰存在雲端環境「DepthStudio (Codemagic)」的 network secret（header `x-auth-token`，由 proxy 注入，不要自己帶值）。
+2. 啟動編譯：`POST https://api.codemagic.io/builds`，body `{"appId":"6b057eb0ef86a3ac863f9d89","workflowId":"depth-studio-unsigned-ios","branch":"<分支>"}`。
+3. 查狀態：`GET https://api.codemagic.io/builds/<buildId>`（`build.status`、`buildActions[].status`、`buildActions[].logUrl`、`artefacts[].url`）。用背景迴圈每分鐘查一次。
+4. 成功後建立公開下載連結：`POST <artefact url>/public-url`，body `{"expiresAt": <unix 秒>}`。
+5. 以該連結觸發 `.github/workflows/publish-ipa.yml`（Linux，`workflow_dispatch`，inputs：`ipa_url`、`notes`、`built_by`），它會檢查 IPA、產生 AltStore source 並發佈 Release（標為 latest），AltStore 即可更新。
+6. Codemagic 的 build number = Codemagic 編號 + 1000（見 `codemagic.yaml`）。
+
 ## 使用者端安裝（AltStore）
 
 - 一次性設定：AltStore → Sources → `+` → 貼上

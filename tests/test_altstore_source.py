@@ -80,6 +80,19 @@ class AltStoreSourceTests(unittest.TestCase):
                 make_altstore_source.build_source(ipa, "https://x", "https://y", "")
 
 
+class IPAInfoTests(unittest.TestCase):
+    def test_reads_version_build_and_bundle_from_ipa(self):
+        ipa_info = load("ipa_info")
+        with tempfile.TemporaryDirectory() as temp:
+            ipa = Path(temp) / "DepthStudio.ipa"
+            write_ipa(ipa, INFO)
+            values = ipa_info.ipa_info(ipa)
+        self.assertEqual(values["APP_VERSION"], "1.0.3")
+        self.assertEqual(values["APP_BUILD_NUMBER"], "105")
+        self.assertEqual(values["BUNDLE_ID"], "com.bananaflow.depthstudio")
+        self.assertEqual(values["APP_NAME"], "Depth Studio")
+
+
 class PackageVersionTests(unittest.TestCase):
     def make_app(self, root: Path) -> Path:
         app = root / "Depth Studio.app"

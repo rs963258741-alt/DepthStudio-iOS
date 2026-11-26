@@ -1,0 +1,95 @@
+name: Publish external IPA → AltStore
+
+# Publishes an IPA that was built outside GitHub Actions (on Codemagic, when GitHub's
+# macOS runners are not available) as a GitHub Release with an AltStore source, the
+# same way ios-build.yml does. Runs on Linux only.
+#
+# Inputs: a download URL for DepthStudio.ipa (e.g. a Codemagic artifact public URL)
+# and the release notes shown in AltStore.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ipa_url:
+        description: "Download URL of the built DepthStudio.ipa"
+        required: true
+      notes:
+        description: "What changed (shown in AltStore)"
+        required: true
+      built_by:
+        description: "Where it was built (shown in the release notes)"
+        required: false
+        default: "Codemagic"
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    name: Publish IPA (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Download and check IPA
+        env:
+          IPA_URL: ${{ inputs.ipa_url }}
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          curl -fsSL --retry 3 -o build/DepthStudio.ipa "$IPA_URL"
+          ls -l build/DepthStudio.ipa
+          python3 scripts/ipa_info.py --ipa build/DepthStudio.ipa \
+            --expect-bundle-id com.bananaflow.depthstudio > build/build-info.env
+          cat build/build-info.env
+
+      - name: Publish release for AltStore
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NOTES: ${{ inputs.notes }}
+          BUILT_BY: ${{ inputs.built_by }}
+        run: |
+          set -euo pipefail
+          source build/build-info.env
+
+          TAG="v${APP_VERSION}-build.${APP_BUILD_NUMBER}"
+          REPO_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}"
+          IPA_URL="${REPO_URL}/releases/download/${TAG}/DepthStudio.ipa"
+          SOURCE_URL="${REPO_URL}/releases/latest/download/altstore-source.json"
+          ICON_URL="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${GITHUB_SHA}/Assets.xcassets/AppIcon.appiconset/AppIcon.png"
+
+          python3 scripts/make_altstore_source.py \
+            --ipa build/DepthStudio.ipa \
+            --download-url "$IPA_URL" \
+            --icon-url "$ICON_URL" \
+            --website "$REPO_URL" \
+            --notes "$NOTES" \
+            --output build/altstore-source.json
+
+          {
+            printf '%s\n\n' "$NOTES"
+            echo "---"
+            echo "**Version** ${APP_VERSION} (build ${APP_BUILD_NUMBER}) · built on ${BUILT_BY:-Codemagic} · branch \`${GITHUB_REF_NAME}\` · commit ${GITHUB_SHA::7}"
+            echo
+            echo "**Install with AltStore:** add this source once in AltStore → Sources → +"
+            echo
+            echo "\`${SOURCE_URL}\`"
+            echo
+            echo "Or open this page in Safari on the iPhone, download DepthStudio.ipa, and share it to AltStore."
+          } > build/release-notes.md
+
+          gh release create "$TAG" \
+            build/DepthStudio.ipa \
+            build/altstore-source.json \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Depth Studio ${APP_VERSION} (build ${APP_BUILD_NUMBER})" \
+            --notes-file build/release-notes.md \
+            --latest
+
+          {
+            echo "### ✅ Depth Studio ${APP_VERSION} (build ${APP_BUILD_NUMBER}) — built on ${BUILT_BY:-Codemagic}"
+            echo "- Release: ${REPO_URL}/releases/tag/${TAG}"
+            echo "- AltStore source: \`${SOURCE_URL}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
