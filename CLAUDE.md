@@ -41,6 +41,7 @@ python3 -m py_compile scripts/*.py && bash -n scripts/ci_build.sh
 - `checks`（ubuntu）跑上面的測試 → `build`（`macos-15`）執行 `scripts/ci_build.sh` → 發佈 Release。
 - 完整 xcodebuild log 存在 artifact；console 只印 error，失敗時最後會印 `BUILD FAILURE SUMMARY`。
 - Release tag：`v<MARKETING_VERSION>-build.<N>`，並標為 latest。
+- **Commit message 第一段（到第一個空行為止）會成為 Release 與 AltStore 顯示的更新說明**，請用繁體中文寫給使用者看的變更摘要；技術細節寫在後面的段落。
 - `codemagic.yaml` 呼叫同一支 `scripts/ci_build.sh`，是手動備援，不會自動觸發。
 
 ### 監看與修正（使用 GitHub MCP 工具）

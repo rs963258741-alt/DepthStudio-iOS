@@ -89,10 +89,11 @@ jobs:
           SOURCE_URL="${REPO_URL}/releases/latest/download/altstore-source.json"
           ICON_URL="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${GITHUB_SHA}/Assets.xcassets/AppIcon.appiconset/AppIcon.png"
 
-          # Release notes: the manual input, else the commit message without git trailers.
+          # Release notes (shown in AltStore): the manual input, else the first
+          # paragraph of the commit message. Technical detail stays in git.
           NOTES="${NOTES_INPUT:-}"
           if [[ -z "$NOTES" ]]; then
-            NOTES="$(printf '%s\n' "${COMMIT_MESSAGE:-Manual build}" | sed -E '/^(Co-Authored-By|Claude-Session|Signed-off-by):/d')"
+            NOTES="$(printf '%s\n' "${COMMIT_MESSAGE:-Manual build}" | awk 'BEGIN { RS = "" } NR == 1 { print; exit }')"
           fi
 
           python3 scripts/make_altstore_source.py \
