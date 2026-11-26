@@ -1,14 +1,30 @@
 # Depth Studio iOS — V8.18 功能對齊版
 
+## 安裝與自動建置
+
+[![iOS build → AltStore](https://github.com/rs963258741-alt/DepthStudio-iOS/actions/workflows/ios-build.yml/badge.svg)](https://github.com/rs963258741-alt/DepthStudio-iOS/actions/workflows/ios-build.yml)
+
+每次 push 到 `main` 或 `claude/**` 分支，GitHub Actions 會在 macOS 上編譯未簽名 IPA，並發佈到 [Releases](https://github.com/rs963258741-alt/DepthStudio-iOS/releases)。
+
+**AltStore 一次性設定：** AltStore → Sources → `+` → 貼上
+
+```
+https://github.com/rs963258741-alt/DepthStudio-iOS/releases/latest/download/altstore-source.json
+```
+
+之後有新版本時，在 AltStore → My Apps 按 Depth Studio 的 **Update** 即可。也可以在 iPhone Safari 打開最新 Release，下載 `DepthStudio.ipa` 後分享到 AltStore。
+
+開發流程細節（版本號、CI、除錯方式）見 [`CLAUDE.md`](CLAUDE.md)。Codemagic（`codemagic.yaml`）保留為手動備援，與 GitHub Actions 共用 `scripts/ci_build.sh`。
+
 這個 Repository 是獨立的原生 iOS App 專案。網頁版原始專案不在這裡修改；本專案以使用者提供的 `DepthStudio_WebPreview_V8_18.zip` 作為功能比對基準。
 
 ## 版本
 
 - App version：`1.0.3`
-- Build：`4`
+- Build：由 CI 自動編號（GitHub Actions run number + 100）
 - Minimum iOS：`17.0`
 - Bundle ID：`com.bananaflow.depthstudio`
-- Build：Codemagic cloud macOS + XcodeGen + Xcode
+- Build：GitHub Actions macOS（主要）／Codemagic（備援）+ XcodeGen + Xcode
 - IPA：使用 `scripts/package_ipa.py` 產生，封裝結構沿用先前在 AltStore 實際安裝成功的 Payload ZIP 方式。
 
 ## V8.18 功能對照

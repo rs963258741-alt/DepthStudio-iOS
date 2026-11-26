@@ -43,8 +43,6 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         MARKETING_VERSION: "1.0.3"
         CURRENT_PROJECT_VERSION: "4"
-        INFOPLIST_KEY_CFBundleShortVersionString: "1.0.3"
-        INFOPLIST_KEY_CFBundleVersion: "4"
         INFOPLIST_KEY_UILaunchStoryboardName: LaunchScreen
         PRODUCT_BUNDLE_IDENTIFIER: com.bananaflow.depthstudio
         PRODUCT_NAME: "Depth Studio"
