@@ -191,7 +191,9 @@ final class ExportPipelineTests: XCTestCase {
             XCTAssertGreaterThan(alpha, 3, "\(id) should be drawn at 1.5 s (alpha \(alpha))")
             let drawn = PixelCompare.meanDifference(bare, exportedFrame, size: compareSize, region: region)
             print("[export-test] \(id): HUD alpha \(alpha), exported frame vs bare video \(drawn)")
-            XCTAssertGreaterThan(drawn, 3, "\(id) should be in the exported frame at 1.5 s")
+            // The chart is thin lines over a wide area, so its average change is smaller.
+            // (An area without HUD differs by about 0.2 from the bare frame.)
+            XCTAssertGreaterThan(drawn, id == "profileBlock" ? 1 : 3, "\(id) should be in the exported frame at 1.5 s")
         }
     }
 
