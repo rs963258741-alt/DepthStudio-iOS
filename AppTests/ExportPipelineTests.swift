@@ -157,12 +157,13 @@ final class ExportPipelineTests: XCTestCase {
         var stills: [Double: CGImage] = [:]
         for time in [0.2, 1.5, 3.0] {
             let background = try await sourceFrame(source, at: time, size: size)
-            let expected = try XCTUnwrap(renderer.still(at: time, background: background))
-            stills[time] = expected
             let exported = try await exportedFrame(result, at: time)
+            // Tagged like the decoded frame, so only real differences count.
+            let expected = try XCTUnwrap(renderer.still(at: time, background: background, colorSpace: exported.colorSpace))
+            stills[time] = expected
             let difference = PixelCompare.meanDifference(expected, exported, size: compareSize)
             print("[export-test] depth frame \(time) s differs from the expected frame by \(difference)")
-            XCTAssertLessThan(difference, 10, "exported frame at \(time) s should be the video plus the HUD of that time")
+            XCTAssertLessThan(difference, 5, "exported frame at \(time) s should be the video plus the HUD of that time")
             TestArtifacts.save(TestArtifacts.sideBySide(UIImage(cgImage: expected), UIImage(cgImage: exported), height: 960),
                                name: "depth-hud-frame-\(time)s-expected-vs-exported.png")
         }
@@ -179,8 +180,8 @@ final class ExportPipelineTests: XCTestCase {
         // itself and in the exported frame (compared with the bare video frame).
         let overlay = try XCTUnwrap(renderer.still(at: 1.5))
         let bareBackground = try await sourceFrame(source, at: 1.5, size: size)
-        let bare = try XCTUnwrap(Self.bitmap(bareBackground, size: size))
         let exportedFrame = try await exportedFrame(result, at: 1.5)
+        let bare = try XCTUnwrap(Self.bitmap(bareBackground, size: size, colorSpace: exportedFrame.colorSpace))
         for id in ["elapsedValue", "elapsedLabel", "tempValue", "tempLabel", "speedValue", "speedLabel",
                    "depthUnit", "identityGroup", "profileBlock"] {
             let region = id == "profileBlock"
@@ -215,12 +216,12 @@ final class ExportPipelineTests: XCTestCase {
         var stills: [Double: CGImage] = [:]
         for time in [1.0, 3.0] {
             let background = try await sourceFrame(source, at: time, size: size)
-            let expected = try XCTUnwrap(renderer.still(at: time, background: background))
-            stills[time] = expected
             let exported = try await exportedFrame(result, at: time)
+            let expected = try XCTUnwrap(renderer.still(at: time, background: background, colorSpace: exported.colorSpace))
+            stills[time] = expected
             let difference = PixelCompare.meanDifference(expected, exported, size: compareSize)
             print("[export-test] pool frame \(time) s differs from the expected frame by \(difference)")
-            XCTAssertLessThan(difference, 10, "exported frame at \(time) s should be the video plus the HUD of that time")
+            XCTAssertLessThan(difference, 5, "exported frame at \(time) s should be the video plus the HUD of that time")
             TestArtifacts.save(TestArtifacts.sideBySide(UIImage(cgImage: expected), UIImage(cgImage: exported), height: 540),
                                name: "pool-hud-frame-\(time)s-expected-vs-exported.png")
         }
@@ -334,11 +335,10 @@ final class ExportPipelineTests: XCTestCase {
     }
 
     /// A Core Image frame as a bitmap (no colour conversion, like the export).
-    private static func bitmap(_ image: CIImage, size: CGSize) -> CGImage? {
+    private static func bitmap(_ image: CIImage, size: CGSize, colorSpace: CGColorSpace?) -> CGImage? {
         let context = CIContext(options: [.workingColorSpace: NSNull(), .outputColorSpace: NSNull()])
         let frame = CGRect(origin: .zero, size: size)
-        return context.createCGImage(image.cropped(to: frame), from: frame, format: .RGBA8,
-                                     colorSpace: CGColorSpace(name: CGColorSpace.sRGB))
+        return context.createCGImage(image.cropped(to: frame), from: frame, format: .RGBA8, colorSpace: colorSpace)
     }
 
     /// `image` scaled to fill `size` with a centre crop, like the export.

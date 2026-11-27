@@ -235,12 +235,13 @@ final class HUDOverlayRenderer {
     private static let stillContext = CIContext(options: [.workingColorSpace: NSNull(), .outputColorSpace: NSNull()])
 
     /// The HUD at `time` over `background` (or transparent), as a bitmap of the output size.
-    func still(at time: Double, background: CIImage? = nil) -> CGImage? {
+    /// Like the export, no colour conversion is made; `colorSpace` only tags the result.
+    func still(at time: Double, background: CIImage? = nil,
+               colorSpace: CGColorSpace? = CGColorSpace(name: CGColorSpace.sRGB)) -> CGImage? {
         let frame = CGRect(origin: .zero, size: size)
         var image = overlay(at: time)
         if let background { image = image.composited(over: background) }
-        return Self.stillContext.createCGImage(image.cropped(to: frame), from: frame,
-                                               format: .RGBA8, colorSpace: CGColorSpace(name: CGColorSpace.sRGB))
+        return Self.stillContext.createCGImage(image.cropped(to: frame), from: frame, format: .RGBA8, colorSpace: colorSpace)
     }
 }
 
