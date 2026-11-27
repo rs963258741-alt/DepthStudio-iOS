@@ -13,10 +13,12 @@
 
 - 原生 SwiftUI App，Xcode 專案由 **XcodeGen** 依 `project.yml` 產生（repo 內沒有 `.xcodeproj`）。
 - 啟動流程：`DepthStudioRootView`（`ContentView.swift`）→ 啟動動畫 → `ModeSelectionView` 選模式 → 深度潛水 `ContentView` 或泳池平潛 `PoolModeView`。兩種模式各自獨立的介面。
-- 泳池平潛（V1 基礎模式）：`PoolTimeline.swift`（泳池長度、時間節點、距離插值、分段平均速率、趟次）、`PoolHUDSettings.swift`（16 個 HUD 欄位）、`PoolHUDOverlay.swift`（預覽 HUD 與距離／速率雙曲線）、`PoolVideoHUDLayer.swift`（輸出用 Core Animation HUD）、`PoolModeView.swift`（畫面）。輸出共用 `DiveVideoExporter.exportVideo`（4K、音訊、MP4 驗證）。
+- 泳池平潛（V1 基礎模式）：`PoolTimeline.swift`（泳池長度、時間節點、距離插值、分段平均速率、趟次）、`PoolHUDSettings.swift`（16 個 HUD 欄位）、`PoolHUDOverlay.swift`（預覽 HUD 與距離／速率雙曲線）、`PoolVideoHUDLayer.swift`（輸出用 HUD layer）、`PoolModeView.swift`（畫面）。輸出共用 `DiveVideoExporter.exportVideo`（依來源畫質、音訊、MP4 驗證）。
 - 泳池平潛下一階段（尚未實作）：AI 人體與背景追蹤、浮動速率、任意時間點距離校正（V1.1／V1.2），踢動頻率與滑行效率（V2.0）。
-- 共用元件（`StudioShared.swift`）：`OutputAspect`（原始／1:1／4:5／9:16／16:9）、`ExportSizing`（每種版型都是 3840×2160 的像素量，9:16 = 2160×3840）、`HUDMetrics`（HUD 尺寸以畫面短邊為基準，預覽與輸出共用）、`PlaybackController`（@Observable，只有讀取時間的子 View 會在播放時重繪）、`PlayerLayerView`（aspect-fill，與輸出的置中裁切相同）、浮動「預覽影像」、`ExportProgressClock`（剩餘時間）、`HUDLayoutPresetStore`（「將目前排版設為預設」）。
+- 共用元件（`StudioShared.swift`）：`OutputAspect`（原始／1:1／4:5／9:16／16:9）、`ExportSizing`（輸出依來源畫質：像素量等於來源、上限 3840×2160 的像素量；4K 來源 9:16 = 2160×3840，1080P 來源 9:16 = 1080×1920）、`HUDSnapping`（拖曳時先吸附畫面正中央，再吸附其他欄位）、`HUDMetrics`（HUD 尺寸以畫面短邊為基準，預覽與輸出共用）、`PlaybackController`（@Observable，只有讀取時間的子 View 會在播放時重繪）、`PlayerLayerView`（aspect-fill，與輸出的置中裁切相同）、浮動「預覽影像」、`ExportProgressClock`（剩餘時間）、`HUDLayoutPresetStore`／`HUDPresetSettings`（「將目前排版設為預設1／2」與「預設1／預設2」；預設1 的 key 沿用 1.2 的「設為預設」，「恢復預設位置」只還原預設1 的位置與大小旋轉）。
+- 樣式（`HUDStyle.swift`）：`HUDItemStyle`（每個欄位的字體顏色、陰影、對比，存在設定的 `styles`；舊版設定用 `decodeIfPresent` 讀，缺欄位不會被重設）、`HUDTextLook`（每種文字的字型、顏色、光暈；預覽 `HUDTextView` 與輸出 `HUDLayerFactory.textItem` 共用）、`HUDIdentityView`、`HUDStyleEditor`、`HUDPresetButtons`。所有尺寸都以 `HUDMetrics.unit／point` 計算（最小值也是），所以浮動預覽（即時播放器）與舞台、輸出等比例一致。
 - 輸出 HUD 一律用 `HUDLayerFactory.swift` 建 layer：`contentsScale = 1`、文字垂直置中、線寬與虛線用 `HUDMetrics.point`。圖表幾何用 `DepthProfileGeometry`／`PoolProfileGeometry`，預覽與輸出共用，修改時兩邊一起看。
+- 輸出合成（`HUDVideoCompositor.swift`）：自訂 `AVVideoCompositing`，每一格用 Core Image 合成「來源畫面（旋轉＋置中裁切）＋該時間的 HUD」。隨時間變化的內容（數值文字、曲線標記位置、顯示區間）由 `HUDLayerFactory.addSampledText／addPositionAnimation／addVisibility` 記錄成 `HUDLayerTracks`，由 `HUDOverlayRenderer` 逐格計算；不要再用 Core Animation keyframe 動畫（1.2 在實機上動畫被忽略：數據不動、一開始隱藏的欄位不出現）。每個欄位只在內容改變時重畫，移動的標記只平移。
 - HUD 欄位的手勢必須加在 `.position()` 之前（否則觸控範圍變成整個畫面），並用 `.allowsHitTesting(isEditing)`。
 - 泳池平潛速率：`PoolTimeline` 以 0.1 秒為單位的速率曲線，各段距離固定等於標記；`PoolMotionAnalyzer`（Vision 光流＋人體／顯著物偵測）提供 AI 形狀，否則為 ±0.22 m/s 內的模擬浮動。
 - `project.yml` 的 `sources:` 是**逐檔列出**。新增 Swift 檔／資源時必須同步加進去，否則不會被編譯。
@@ -72,11 +74,14 @@ GitHub 的 macOS runner 曾整段時間拿不到機器（job 排隊 15 分鐘後
 
 ### 自動測試（iPhone 模擬器）
 
-- `AppTests/`（XCTest）：泳池計算、輸出尺寸、預設排版、實際輸出 4K 影片並與預覽比對；圖片寫到 `build/test-artifacts/*-preview-vs-export.png`。
-- `AppUITests/`（XCUITest）：拖曳每個 HUD 欄位、排版開關、設為預設後恢復。
+- `AppTests/`（XCTest）：泳池計算、輸出尺寸、預設1／2、樣式、吸附、實際輸出含 HUD 的影片並逐格比對、輸出與預覽比對；圖片寫到 `build/test-artifacts/`（`*-preview-vs-export.png`、`*-expected-vs-exported.png`、`stage-vs-floating-preview.png`）。
+- `AppUITests/`（XCUITest）：拖曳每個 HUD 欄位、排版開關、預設1／2 儲存與套用（含重新啟動）、各版型置中吸附、浮動預覽即時且等比例、AI 提醒、樣式控制、輸出規格。
 - 執行：`scripts/ci_test.sh`；Codemagic workflow `depth-studio-tests`（`POST /builds` 的 `workflowId`）。修改 HUD、輸出或排版相關程式後都要跑一次，並下載比對圖檢查。
+- 只跑部分測試：環境變數 `TEST_FILTER`（空白或逗號分隔，例如 `DepthStudioTests/ExportPipelineTests DepthStudioUITests/Round3UITests`），用 Codemagic `POST /builds` 的 `"environment": {"variables": {"TEST_FILTER": "..."}}` 帶入。
+- 含 HUD 的完整輸出在模擬器可以實際執行（自訂合成器不經過 Core Animation 的輸出工具）：`ExportPipelineTests` 會輸出含 HUD 的影片，逐格與「來源畫面＋該時間的 HUD」比對，並確認數值會變、即時欄位在潛水期間出現。
+- UI 測試可用啟動參數 `-uitest-sample-video`（`UITestSupport.swift`，只在 Debug 編譯）讓兩種模式自動載入一段產生的 4 秒直式影片（泳池模式也會標好時間節點），以便測版型、浮動預覽、AI 提醒。
 - 模擬器的限制（已查證，不是程式錯誤）：
-  - `AVVideoCompositionCoreAnimationTool` 在模擬器會當機（IOSurface 配置失敗，連空白 HUD 也一樣）。因此測試在沒有 HUD 時實際輸出（驗證尺寸、裁切、進度與 MP4 檢查），HUD 本身則用 `HUDLayerFactory.stillTime` 產生靜態畫面，並與 SwiftUI 預覽並排比對；含 HUD 的完整輸出測試只在實機執行。
+  - `AVVideoCompositionCoreAnimationTool` 在模擬器會當機（IOSurface 配置失敗）；1.3 起輸出已不使用它。
   - Vision 光流（`VNGenerateOpticalFlowRequest`）在模擬器無法建立，AI 分析測試在模擬器上會 skip。
 - UI 測試要點：預覽舞台比螢幕下半部還長，拖曳下方欄位前要先捲動（`bringIntoView`）；HUD 欄位只用一個 `highPriorityGesture(DragGesture(minimumDistance: 0))` 同時處理選取與拖曳（另外的 tap 手勢會把短距離拖曳吃掉）。
 - 結果下載：`GET /builds/<id>` 的 `artefacts[].url`（zip 內含 `build/test-summary.txt`、`build/test-artifacts/*.png`、`*-results.json`、當機時的 `.ips`）。

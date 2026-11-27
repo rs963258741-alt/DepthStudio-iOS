@@ -129,9 +129,12 @@ final class HUDOverlayRenderer {
     /// at the right spot of the output frame.
     private func render(_ layer: CALayer) -> CIImage? {
         let unit = HUDMetrics.unit(for: size)
+        // Room for glows and shadows around what is drawn.
         let padding = unit * 0.08
         let frame = CGRect(origin: .zero, size: size)
-        var rect = root.convert(layer.bounds, from: layer).insetBy(dx: -padding, dy: -padding).integral
+        let drawn = Self.drawnBounds(of: layer)
+        guard !drawn.isNull else { return nil }
+        var rect = root.convert(drawn, from: layer).insetBy(dx: -padding, dy: -padding).integral
         rect = rect.intersection(frame.insetBy(dx: -size.width * 0.5, dy: -size.height * 0.5))
         guard !rect.isNull, rect.width >= 1, rect.height >= 1 else { return nil }
         let transform = Self.transform(from: layer, to: root)
@@ -155,6 +158,46 @@ final class HUDOverlayRenderer {
             ])
         }
         return output
+    }
+
+    /// The part of `layer` (in its own coordinates) that actually has something drawn:
+    /// the text's width rather than its wide box, a shape's path, and the union over the
+    /// visible sublayers. Rendering only this area keeps the per-change cost low at 4K.
+    static func drawnBounds(of layer: CALayer) -> CGRect {
+        if layer.isHidden { return .null }
+        var rect = CGRect.null
+        if let text = layer as? CATextLayer {
+            rect = textBounds(of: text)
+        } else if let shape = layer as? CAShapeLayer, let path = shape.path {
+            rect = path.boundingBoxOfPath.insetBy(dx: -shape.lineWidth, dy: -shape.lineWidth)
+        } else if layer.contents != nil || layer.backgroundColor != nil || layer.borderWidth > 0 {
+            rect = layer.bounds
+        }
+        for sublayer in layer.sublayers ?? [] {
+            let inner = drawnBounds(of: sublayer)
+            if !inner.isNull { rect = rect.union(layer.convert(inner, from: sublayer)) }
+        }
+        return rect
+    }
+
+    private static func textBounds(of layer: CATextLayer) -> CGRect {
+        let bounds = layer.bounds
+        let width: CGFloat
+        if let attributed = layer.string as? NSAttributedString {
+            width = ceil(attributed.size().width)
+        } else if let string = layer.string as? String, let font = layer.font.flatMap({ $0 as? UIFont }) {
+            width = ceil((string as NSString).size(withAttributes: [.font: font]).width)
+        } else {
+            return bounds
+        }
+        let drawnWidth = min(bounds.width, width + 4)
+        let x: CGFloat
+        switch layer.alignmentMode {
+        case .left, .natural: x = bounds.minX
+        case .right: x = bounds.maxX - drawnWidth
+        default: x = bounds.midX - drawnWidth / 2
+        }
+        return CGRect(x: x, y: bounds.minY, width: drawnWidth, height: bounds.height)
     }
 
     /// The affine transform from `layer`'s coordinates to `ancestor`'s.
