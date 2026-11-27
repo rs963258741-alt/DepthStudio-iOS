@@ -436,6 +436,7 @@ struct ContentView: View {
                             .font(.caption)
                             .tint(DepthStudioColors.cyan)
                             .toggleStyle(.switch)
+                            .accessibilityIdentifier("visibility.\(item.id)")
                     }
                 }
             }

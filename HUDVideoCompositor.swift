@@ -7,10 +7,11 @@ import UIKit
 /// time, as a Core Image overlay.
 ///
 /// Every top-level HUD item is rendered into its own image, and only again when what it
-/// shows changes (a new text value). Moving parts (the chart's playhead and markers) are
-/// rendered once and then only moved. Visibility, text and positions come from the
-/// `HUDLayerTracks` recorded on the layers, so each frame shows exactly the values of
-/// its video time.
+/// shows changes (a new text value). Moving parts (the chart's playhead and markers, the
+/// depth gauge's badge) are rendered once and then only moved; a moving part with text
+/// (the badge's depth) is rendered again only when its text changes. Visibility, text and
+/// positions come from the `HUDLayerTracks` recorded on the layers, so each frame shows
+/// exactly the values of its video time.
 final class HUDOverlayRenderer {
     let size: CGSize
     private let root: CALayer
@@ -20,8 +21,11 @@ final class HUDOverlayRenderer {
     private final class Sprite {
         let layer: CALayer
         let tracks: HUDLayerTracks
+        var texts: [(layer: CATextLayer, tracks: HUDLayerTracks)] = []
+        var key: String?
         var image: CIImage?
         var reference = CGPoint.zero
+        var hasReference = false
         init(layer: CALayer, tracks: HUDLayerTracks) { self.layer = layer; self.tracks = tracks }
     }
 
@@ -78,13 +82,24 @@ final class HUDOverlayRenderer {
     private func collect(_ layer: CALayer, into item: Item, isRoot: Bool) {
         if !isRoot, let tracks = HUDLayerTracks.existing(on: layer) {
             if tracks.hasPosition {
-                item.sprites.append(Sprite(layer: layer, tracks: tracks))
+                let sprite = Sprite(layer: layer, tracks: tracks)
+                Self.collectTexts(in: layer, into: sprite)
+                item.sprites.append(sprite)
                 return
             }
             if let text = layer as? CATextLayer, tracks.hasText { item.texts.append((text, tracks)) }
             if tracks.visibleRange != nil { item.toggles.append((layer, tracks)) }
         }
         for sublayer in layer.sublayers ?? [] { collect(sublayer, into: item, isRoot: false) }
+    }
+
+    private static func collectTexts(in layer: CALayer, into sprite: Sprite) {
+        for sublayer in layer.sublayers ?? [] {
+            if let text = sublayer as? CATextLayer, let tracks = HUDLayerTracks.existing(on: text), tracks.hasText {
+                sprite.texts.append((text, tracks))
+            }
+            collectTexts(in: sublayer, into: sprite)
+        }
     }
 
     /// The HUD at `time` over a transparent background, in Core Image coordinates (origin
@@ -113,7 +128,7 @@ final class HUDOverlayRenderer {
         var parts: [String] = []
         for entry in item.texts {
             let value = entry.tracks.text(at: time) ?? ""
-            HUDLayerTracks.setString(value, on: entry.layer)
+            entry.tracks.show(value, on: entry.layer)
             entry.layer.displayIfNeeded()
             parts.append(value)
         }
@@ -133,9 +148,22 @@ final class HUDOverlayRenderer {
 
     private func spriteImage(_ sprite: Sprite, at time: Double) -> CIImage? {
         guard let parent = sprite.layer.superlayer else { return nil }
-        if sprite.image == nil {
+        if !sprite.hasReference {
+            // The layer itself never moves; each frame's image is shifted from here.
             sprite.reference = root.convert(sprite.layer.position, from: parent)
+            sprite.hasReference = true
+        }
+        var parts: [String] = []
+        for entry in sprite.texts {
+            let value = entry.tracks.text(at: time) ?? ""
+            entry.tracks.show(value, on: entry.layer)
+            entry.layer.displayIfNeeded()
+            parts.append(value)
+        }
+        let key = parts.joined(separator: "\u{1F}")
+        if sprite.image == nil || key != sprite.key {
             sprite.image = render(sprite.layer)
+            sprite.key = key
         }
         guard let image = sprite.image else { return nil }
         guard let position = sprite.tracks.position(at: time) else { return image }

@@ -95,14 +95,14 @@ final class HUDLayoutUITests: XCTestCase {
     func testEveryDepthHUDFieldCanBeDragged() {
         let app = launch()
         enter("深度潛水", in: app)
-        assertEveryFieldMoves(["depthValue", "depthUnit", "elapsedValue", "elapsedLabel", "tempValue", "tempLabel",
-                               "speedValue", "speedLabel", "identityGroup", "profileBlock"], in: app)
+        assertEveryFieldMoves(["depthValue", "elapsedValue", "elapsedLabel", "tempValue", "tempLabel",
+                               "speedValue", "speedLabel", "identityGroup", "profileBlock", "depthGauge"], in: app)
     }
 
     func testEveryPoolHUDFieldCanBeDragged() {
         let app = launch()
         enter("泳池平潛", in: app)
-        assertEveryFieldMoves(["distanceValue", "distanceUnit", "elapsedValue", "elapsedLabel", "lapValue", "lapLabel",
+        assertEveryFieldMoves(["distanceValue", "elapsedValue", "elapsedLabel", "lapValue", "lapLabel",
                                "speedValue", "speedLabel", "identityGroup", "footerBrand", "profileBlock"], in: app)
     }
 

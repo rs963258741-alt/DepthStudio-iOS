@@ -39,7 +39,7 @@ class IOSFeatureWiringTests(unittest.TestCase):
         self.assertIn('launch_storyboard != "LaunchScreen"', PACKAGE)
 
     def test_all_web_hud_fields_are_defined_and_rendered(self):
-        expected = ["hudBrand", "hudClock", "identityGroup", "depthValue", "depthUnit",
+        expected = ["hudBrand", "hudClock", "identityGroup", "depthValue", "depthGauge",
                     "elapsedValue", "elapsedLabel", "tempValue", "tempLabel",
                     "speedValue", "speedLabel", "profileTitle", "profileBlock",
                     "footerBrand", "maxDepth"]

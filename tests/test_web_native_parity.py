@@ -10,15 +10,25 @@ CONTENT = (ROOT / "ContentView.swift").read_text(encoding="utf-8")
 EXPORTER = (ROOT / "DiveVideoExporter.swift").read_text(encoding="utf-8")
 
 
+# Intentional native differences from the web V8.18 HUD (user requests, 1.4):
+# the depth unit is part of the depth value (fixed at its bottom right, so the value
+# moved right to keep the number where it was), and the vertical depth gauge is new.
+MERGED_INTO_VALUE = {"depthUnit"}
+NATIVE_ONLY = {"depthGauge": (86.0, 46.0, True)}
+MOVED = {"depthValue": (20.0, 18.0)}
+
+
 class WebV818NativeParityTests(unittest.TestCase):
-    def test_native_has_exact_same_15_hud_items_as_web(self):
+    def test_native_has_the_web_hud_items_with_the_unit_merged_and_the_gauge_added(self):
         web_ids = re.findall(r'<div class="hud-item(?: [^"]*)?" id="([A-Za-z0-9]+)"', WEB)
         hud_section = SETTINGS.split("struct HUDCountryOption", 1)[0]
         native_ids = re.findall(r'\.init\(id: "([A-Za-z0-9]+)"', hud_section)
-        self.assertEqual(set(web_ids), set(native_ids))
         self.assertEqual(len(web_ids), 15)
-        for item_id in web_ids:
+        self.assertEqual((set(web_ids) - MERGED_INTO_VALUE) | set(NATIVE_ONLY), set(native_ids))
+        for item_id in native_ids:
             self.assertIn(f'case "{item_id}"', HUD + EXPORTER)
+        # The unit is drawn with the depth value.
+        self.assertIn('live: { String(format: "%.1f", $0.depthMeters) }, unit: "M")', EXPORTER)
 
     def test_native_defaults_match_web_layout_and_visibility(self):
         layout_match = re.search(r'const DEFAULT_LAYOUT=\{([^}]+)\}', WEB)
@@ -31,13 +41,18 @@ class WebV818NativeParityTests(unittest.TestCase):
             key: (float(x), float(y))
             for key, x, y in re.findall(r'"([A-Za-z0-9]+)": HUDPoint\(x: ([0-9.]+), y: ([0-9.]+)\)', SETTINGS)
         }
-        self.assertEqual(web_layout, native_layout)
+        expected_layout = {key: value for key, value in web_layout.items() if key not in MERGED_INTO_VALUE}
+        expected_layout.update(MOVED)
+        expected_layout.update({key: (x, y) for key, (x, y, _) in NATIVE_ONLY.items()})
+        self.assertEqual(expected_layout, native_layout)
 
         visibility_match = re.search(r'const DEFAULT_VISIBILITY=\{([^}]+)\}', WEB)
         self.assertIsNotNone(visibility_match)
         web_visibility = {key: value == "true" for key, value in re.findall(r'([A-Za-z0-9]+):(true|false)', visibility_match.group(1))}
         native_visibility = {key: value == "true" for key, value in re.findall(r'"([A-Za-z0-9]+)": (true|false)', SETTINGS)}
-        self.assertEqual(web_visibility, native_visibility)
+        expected_visibility = {key: value for key, value in web_visibility.items() if key not in MERGED_INTO_VALUE}
+        expected_visibility.update({key: shown for key, (_, _, shown) in NATIVE_ONLY.items()})
+        self.assertEqual(expected_visibility, native_visibility)
 
     def test_identity_options_match_web(self):
         for flag in ["roc", "hongkong", "china", "southkorea", "malaysia", "japan", "chinesetaipei"]:

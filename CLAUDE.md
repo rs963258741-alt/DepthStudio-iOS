@@ -13,11 +13,14 @@
 
 - 原生 SwiftUI App，Xcode 專案由 **XcodeGen** 依 `project.yml` 產生（repo 內沒有 `.xcodeproj`）。
 - 啟動流程：`DepthStudioRootView`（`ContentView.swift`）→ 啟動動畫 → `ModeSelectionView` 選模式 → 深度潛水 `ContentView` 或泳池平潛 `PoolModeView`。兩種模式各自獨立的介面。
-- 泳池平潛（V1 基礎模式）：`PoolTimeline.swift`（泳池長度、時間節點、距離插值、分段平均速率、趟次）、`PoolHUDSettings.swift`（16 個 HUD 欄位）、`PoolHUDOverlay.swift`（預覽 HUD 與距離／速率雙曲線）、`PoolVideoHUDLayer.swift`（輸出用 HUD layer）、`PoolModeView.swift`（畫面）。輸出共用 `DiveVideoExporter.exportVideo`（依來源畫質、音訊、MP4 驗證）。
+- 泳池平潛（V1 基礎模式）：`PoolTimeline.swift`（泳池長度、時間節點、距離插值、分段平均速率、趟次）、`PoolHUDSettings.swift`（15 個 HUD 欄位）、`PoolHUDOverlay.swift`（預覽 HUD 與距離／速率雙曲線）、`PoolVideoHUDLayer.swift`（輸出用 HUD layer）、`PoolModeView.swift`（畫面）。輸出共用 `DiveVideoExporter.exportVideo`（依來源畫質、音訊、MP4 驗證）。
 - 泳池平潛下一階段（尚未實作）：AI 人體與背景追蹤、浮動速率、任意時間點距離校正（V1.1／V1.2），踢動頻率與滑行效率（V2.0）。
 - 共用元件（`StudioShared.swift`）：`OutputAspect`（原始／1:1／4:5／9:16／16:9）、`ExportSizing`（輸出依來源畫質：像素量等於來源、上限 3840×2160 的像素量；4K 來源 9:16 = 2160×3840，1080P 來源 9:16 = 1080×1920）、`HUDSnapping`（拖曳時先吸附畫面正中央，再吸附其他欄位）、`HUDMetrics`（HUD 尺寸以畫面短邊為基準，預覽與輸出共用）、`PlaybackController`（@Observable，只有讀取時間的子 View 會在播放時重繪）、`PlayerLayerView`（aspect-fill，與輸出的置中裁切相同）、浮動「預覽影像」、`ExportProgressClock`（剩餘時間）、`HUDLayoutPresetStore`／`HUDPresetSettings`（「將目前排版設為預設1／2」與「預設1／預設2」；預設1 的 key 沿用 1.2 的「設為預設」，「恢復預設位置」只還原預設1 的位置與大小旋轉）。
 - 樣式（`HUDStyle.swift`）：`HUDItemStyle`（每個欄位的字體顏色、陰影、對比，存在設定的 `styles`；舊版設定用 `decodeIfPresent` 讀，缺欄位不會被重設）、`HUDTextLook`（每種文字的字型、顏色、光暈；預覽 `HUDTextView` 與輸出 `HUDLayerFactory.textItem` 共用）、`HUDIdentityView`、`HUDStyleEditor`、`HUDPresetButtons`。所有尺寸都以 `HUDMetrics.unit／point` 計算（最小值也是），所以浮動預覽（即時播放器）與舞台、輸出等比例一致。
 - 輸出 HUD 一律用 `HUDLayerFactory.swift` 建 layer：`contentsScale = 1`、文字垂直置中、線寬與虛線用 `HUDMetrics.point`。圖表幾何用 `DepthProfileGeometry`／`PoolProfileGeometry`，預覽與輸出共用，修改時兩邊一起看。
+- 深度／距離單位（1.4 起）：「M」是即時深度數值（`depthValue`）與累積距離數值（`distanceValue`）的一部分，固定在數值右下角（同一基線），不能單獨移動；沒有 `depthUnit`／`distanceUnit` 欄位了（舊設定由 `mergingDefaults` 移除）。text spec 的 `unit`；預覽 `HUDTextView(unitLabel:)`、輸出 `HUDLayerFactory.textItem(unitLabel:)` 都用兩個文字層畫同一行「數值 單位」（`HUDValueUnitLine`，各自只顯示一部分），各自保留顏色與光暈。隨時間變的這種文字用 `HUDLayerTracks.format`／`show`。
+- 垂直深度指示計（`DepthGauge.swift`，欄位 `depthGauge`）：`DepthGaugeGeometry`（170×400 設計單位，以畫面短邊 0.56 倍為高；刻度依最大深度選 10／20／30…／100（每 10 m）…）預覽 `DepthGaugeView` 與輸出 `DepthGaugeLayerBuilder` 共用。青色標記＝目前深度（輸出時為會移動且數字會變的 sprite，只在潛水期間出現），白色標記＝最大深度。字型 DIN Condensed Bold。
+- 泳池時間輸入：`PoolFormat.parseTime(_:videoDuration:)`；超過影片長度的時間會被拒絕並提示（之前使用者輸入 `00:12:30` 被當成 12 分 30 秒，出發時間在影片結束之後，HUD 整段停在 0.0 m／00:00）；三段式時間若以時:分:秒會超過影片，則當成 分:秒:小數。摘要卡在出發／出水時間超出影片時顯示警告（`timeline.warning`）。輸入時間的 alert 用 `presenting:` 把節點傳給按鈕。
 - 輸出合成（`HUDVideoCompositor.swift`）：自訂 `AVVideoCompositing`，每一格用 Core Image 合成「來源畫面（旋轉＋置中裁切）＋該時間的 HUD」。隨時間變化的內容（數值文字、曲線標記位置、顯示區間）由 `HUDLayerFactory.addSampledText／addPositionAnimation／addVisibility` 記錄成 `HUDLayerTracks`，由 `HUDOverlayRenderer` 逐格計算；不要再用 Core Animation keyframe 動畫（1.2 在實機上動畫被忽略：數據不動、一開始隱藏的欄位不出現）。每個欄位只在內容改變時重畫，移動的標記只平移。
 - HUD 欄位的手勢必須加在 `.position()` 之前（否則觸控範圍變成整個畫面），並用 `.allowsHitTesting(isEditing)`。
 - 泳池平潛速率：`PoolTimeline` 以 0.1 秒為單位的速率曲線，各段距離固定等於標記；`PoolMotionAnalyzer`（Vision 光流＋人體／顯著物偵測）提供 AI 形狀，否則為 ±0.22 m/s 內的模擬浮動。

@@ -50,6 +50,7 @@ struct DiveHUDOverlay: View {
                             .allowsHitTesting(isEditing)
                             .accessibilityElement(children: .ignore)
                             .accessibilityLabel(definition.title)
+                            .accessibilityValue(accessibilityText(definition.id))
                             .accessibilityIdentifier("hud.\(definition.id)")
                             .position(
                                 x: size.width * CGFloat(point.x / 100),
@@ -77,12 +78,29 @@ struct DiveHUDOverlay: View {
                 .shadow(color: style.accent(.cyan).swiftUI.opacity(style.glowOpacity(HUDChartColors.glow)),
                         radius: HUDChartColors.glowRadius * HUDMetrics.point(unit: unit))
                 .hudDropShadow(style, point: HUDMetrics.point(unit: unit))
+        case "depthGauge":
+            DepthGaugeView(geometry: DepthGaugeGeometry(unit: unit, maximumDepth: gaugeMaximum),
+                           depth: reading?.depthMeters, style: style)
         default:
             if let spec = DiveVideoExporter.textSpec(for: id, maximumDepth: maximumDepth, deviceName: deviceName) {
                 HUDTextView(text: reading.flatMap { spec.live?($0) } ?? previewText(id, spec: spec),
-                            look: spec.look, style: style, unit: unit)
+                            look: spec.look, style: style, unit: unit, unitLabel: spec.unit)
             }
         }
+    }
+
+    /// The gauge's scale covers the deepest sample, like the export.
+    private var gaugeMaximum: Double { max(maximumDepth, samples.map(\.depthMeters).max() ?? 0) }
+
+    /// What a field shows, for VoiceOver and the UI tests ("12.3 M", "00:41", the gauge's depth).
+    private func accessibilityText(_ id: String) -> String {
+        if id == "depthGauge" {
+            let geometry = DepthGaugeGeometry(unit: 1, maximumDepth: gaugeMaximum)
+            return reading.map { "\(geometry.badgeText($0.depthMeters)) / \(geometry.maximumText)" } ?? geometry.maximumText
+        }
+        guard let spec = DiveVideoExporter.textSpec(for: id, maximumDepth: maximumDepth, deviceName: deviceName) else { return "" }
+        let text = reading.flatMap { spec.live?($0) } ?? previewText(id, spec: spec)
+        return spec.unit.map { "\(text) \($0)" } ?? text
     }
 
     /// Text shown without a reading (outside the dive); live fields are hidden then anyway.

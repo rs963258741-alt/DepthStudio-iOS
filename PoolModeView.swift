@@ -128,13 +128,16 @@ struct PoolModeView: View {
         } message: {
             Text("目前匯入的影片與時間節點不會保留；HUD 外觀設定會保留。")
         }
-        .alert("輸入影片時間", isPresented: timeEntryPresented) {
+        // The node is handed to the buttons (`presenting:`): the alert clears
+        // timeEntryNodeID when it closes, which can happen before the button's action runs.
+        .alert("輸入影片時間", isPresented: timeEntryPresented, presenting: timeEntryNodeID) { nodeID in
             TextField("例如 01:40.5", text: $timeEntryText)
                 .keyboardType(.numbersAndPunctuation)
-            Button("確定") { applyTimeEntry() }
+                .accessibilityIdentifier("timeEntry.field")
+            Button("確定") { applyTimeEntry(nodeID) }
             Button("取消", role: .cancel) { timeEntryNodeID = nil }
-        } message: {
-            Text("格式為 分:秒 或 分:秒.小數，也可以直接輸入秒數。")
+        } message: { _ in
+            Text(timeEntryHint)
         }
         .fileImporter(isPresented: $showingFileImporter, allowedContentTypes: videoContentTypes) { result in
             loadVideo(result)
@@ -399,13 +402,16 @@ struct PoolModeView: View {
             Button { jump(to: node) } label: {
                 Text(node.videoTime.map(PoolFormat.preciseClock) ?? "未標記")
                     .font(.system(.footnote, design: .monospaced).weight(.semibold))
-                    .foregroundStyle(node.videoTime == nil ? DepthStudioColors.muted : .white)
+                    .foregroundStyle(node.videoTime == nil ? DepthStudioColors.muted
+                                     : isPastVideoEnd(node.videoTime) ? Color.orange : Color.white)
                     .padding(.horizontal, 10).padding(.vertical, 6)
                     .overlay(Capsule().stroke(DepthStudioColors.cyan.opacity(0.35), lineWidth: 1))
             }
             .buttonStyle(.plain)
             .disabled(node.videoTime == nil || !playback.hasVideo)
             .accessibilityLabel("跳到 \(PoolFormat.distance(node.distance)) 公尺的時間")
+            .accessibilityValue(node.videoTime.map(PoolFormat.preciseClock) ?? "未標記")
+            .accessibilityIdentifier("node.time.\(PoolFormat.distance(node.distance))")
 
             Button { session.setTime(playback.currentTime, for: node.id) } label: {
                 Text("標記")
@@ -435,6 +441,8 @@ struct PoolModeView: View {
                     .font(.title3)
                     .foregroundStyle(DepthStudioColors.muted)
             }
+            .accessibilityLabel("\(PoolFormat.distance(node.distance)) 公尺的時間選項")
+            .accessibilityIdentifier("node.menu.\(PoolFormat.distance(node.distance))")
         }
         .padding(.vertical, 6).padding(.horizontal, 10)
         .background(DepthStudioColors.background, in: RoundedRectangle(cornerRadius: 12))
@@ -463,6 +471,12 @@ struct PoolModeView: View {
             }
             Text(speedSourceText(timeline))
                 .font(.caption2).foregroundStyle(.secondary)
+            if let warning = timelineWarning(timeline) {
+                Label(warning, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.orange)
+                    .accessibilityIdentifier("timeline.warning")
+            }
         }
         .padding(11)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -565,6 +579,7 @@ struct PoolModeView: View {
                             .font(.caption)
                             .tint(DepthStudioColors.cyan)
                             .toggleStyle(.switch)
+                            .accessibilityIdentifier("visibility.\(item.id)")
                     }
                 }
             }
@@ -897,7 +912,30 @@ struct PoolModeView: View {
 
     private func nudge(_ node: PoolNode, by delta: Double) {
         let base = node.videoTime ?? playback.currentTime
-        session.setTime(max(0, base + delta), for: node.id)
+        var time = max(0, base + delta)
+        if playback.hasVideo, playback.duration > 0 { time = min(time, playback.duration) }
+        session.setTime(time, for: node.id)
+    }
+
+    private func isPastVideoEnd(_ time: Double?) -> Bool {
+        guard let time, playback.hasVideo, playback.duration > 0 else { return false }
+        return time > playback.duration + PoolFormat.durationTolerance
+    }
+
+    /// Why the HUD would not move in the video: the start is after the video's end, or the
+    /// finish is past it.
+    private func timelineWarning(_ timeline: PoolTimeline) -> String? {
+        guard playback.hasVideo, playback.duration > 0 else { return nil }
+        let duration = playback.duration
+        if timeline.startTime >= duration - PoolFormat.durationTolerance {
+            return "「0 m 出發」的時間 \(PoolFormat.preciseClock(timeline.startTime)) 在影片結束（\(PoolFormat.preciseClock(duration))）之後，"
+                + "影片中的距離與時間會一直停在 0.0 m／00:00。請播放到出發的瞬間按「標記」，或重新輸入時間。"
+        }
+        if timeline.finishTime > duration + PoolFormat.durationTolerance {
+            return "「結束出水」的時間 \(PoolFormat.preciseClock(timeline.finishTime)) 超過影片長度（\(PoolFormat.preciseClock(duration))），"
+                + "影片結束前不會到達最終距離。請重新標記或輸入時間。"
+        }
+        return nil
     }
 
     private func beginTimeEntry(for node: PoolNode) {
@@ -905,15 +943,33 @@ struct PoolModeView: View {
         timeEntryNodeID = node.id
     }
 
-    private func applyTimeEntry() {
-        guard let id = timeEntryNodeID else { return }
+    /// The time entry's help text, with the video's length when a video is loaded.
+    private var timeEntryHint: String {
+        let format = "格式為 分:秒 或 分:秒.小數（例如 00:12.5），也可以直接輸入秒數。"
+        guard playback.hasVideo, playback.duration > 0 else { return format }
+        return format + "影片長度 \(PoolFormat.preciseClock(playback.duration))。"
+    }
+
+    /// Applies a typed time to `id`. Times past the end of the video are refused (they
+    /// would keep the HUD at 0.0 m / 00:00 for the whole video), and "00:12:5" typed with
+    /// ":" instead of "." is read as 00:12.5 when 12 minutes would be past the video's end.
+    private func applyTimeEntry(_ id: UUID) {
         timeEntryNodeID = nil
-        guard let seconds = PoolFormat.parseTime(timeEntryText) else {
-            errorMessage = "無法辨識時間「\(timeEntryText)」，請輸入例如 01:40.5 或 100。"
+        let duration = playback.hasVideo && playback.duration > 0 ? playback.duration : nil
+        guard let seconds = PoolFormat.parseTime(timeEntryText, videoDuration: duration) else {
+            errorMessage = "無法辨識時間「\(timeEntryText)」，請輸入例如 00:12.5（分:秒.小數）或 12.5（秒）。"
+            return
+        }
+        if let duration, seconds > duration + PoolFormat.durationTolerance {
+            errorMessage = "輸入的時間 \(PoolFormat.preciseClock(seconds)) 超過影片長度 \(PoolFormat.preciseClock(duration))，"
+                + "未套用。請輸入影片中的時間，例如 00:12.5（分:秒.小數）。"
             return
         }
         errorMessage = nil
         session.setTime(seconds, for: id)
+        if let node = session.nodes.first(where: { $0.id == id }) {
+            statusMessage = "已將「\(PoolFormat.distance(node.distance)) m \(node.title)」設為 \(PoolFormat.preciseClock(node.videoTime ?? seconds))。"
+        }
     }
 
     private func addCheckpoint() {

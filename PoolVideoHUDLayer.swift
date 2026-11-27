@@ -40,6 +40,8 @@ struct PoolHUDLayerBuilder {
         var text: String
         var look: HUDTextLook
         var live: ((PoolReading) -> String)? = nil
+        /// Drawn at the value's bottom right as part of the same field (the distance's "M").
+        var unit: String? = nil
     }
 
     func makeLayer(size: CGSize) -> CALayer {
@@ -66,9 +68,10 @@ struct PoolHUDLayerBuilder {
             default:
                 guard let spec = textSpec(for: item.id) else { continue }
                 let made = HUDLayerFactory.textItem(spec.text, look: spec.look, style: style, unit: unit,
-                                                    width: spec.live == nil ? nil : max(unit * 0.9, 10))
+                                                    width: spec.live == nil ? nil : max(unit * 0.9, 10),
+                                                    unitLabel: spec.unit)
                 if let live = spec.live {
-                    HUDLayerFactory.addSampledText(to: made.text, times: item.id == "hudClock" ? clockTimes : swimTimes,
+                    HUDLayerFactory.addSampledText(to: made.texts, times: item.id == "hudClock" ? clockTimes : swimTimes,
                                                    duration: videoDuration, key: "pool-text-\(item.id)") { time in
                         live(timeline.reading(atVideoTime: time))
                     }
@@ -92,8 +95,8 @@ struct PoolHUDLayerBuilder {
         switch id {
         case "hudBrand": return TextSpec(text: "● FREEDIVE / POOL DYNAMIC", look: .brand)
         case "hudClock": return TextSpec(text: "00:00", look: .clock, live: { PoolFormat.clock($0.videoTime) })
-        case "distanceValue": return TextSpec(text: "0.0", look: .distanceValue, live: { PoolFormat.distance($0.distance) })
-        case "distanceUnit": return TextSpec(text: "M", look: .unitLetter)
+        case "distanceValue":
+            return TextSpec(text: "0.0", look: .distanceValue, live: { PoolFormat.distance($0.distance) }, unit: "M")
         case "elapsedValue": return TextSpec(text: "00:00", look: .value, live: { PoolFormat.clock($0.elapsedSeconds) })
         case "elapsedLabel": return TextSpec(text: "DIVE TIME", look: .label)
         case "lapValue": return TextSpec(text: "01 / 01", look: .value, live: { PoolFormat.lap($0) })

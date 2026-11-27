@@ -424,18 +424,35 @@ enum PoolFormat {
     static func speed(_ metresPerSecond: Double) -> String { String(format: "%.2f", metresPerSecond) }
     static func lap(_ reading: PoolReading) -> String { String(format: "%02d / %02d", reading.lap, reading.totalLaps) }
 
-    /// Parses "150", "2:30", "02:30.5" or "1:02:30" into seconds.
-    static func parseTime(_ text: String) -> Double? {
-        let parts = text.trimmingCharacters(in: .whitespaces)
-            .replacingOccurrences(of: "：", with: ":")
-            .split(separator: ":", omittingEmptySubsequences: false)
-            .map { String($0) }
+    /// How far past the video's end a time may be (rounding of the marks and the duration).
+    static let durationTolerance = 0.05
+
+    /// Parses a typed time into seconds: "150", "12.5", "2:30", "02:30.5" or "1:02:30".
+    /// Full-width digits and colons, "," as the decimal mark and 分／秒 are accepted.
+    ///
+    /// With the video's length: a three-part time that would be past the video's end as
+    /// h:m:s is read as m:s with the last part as the decimals when that fits the video
+    /// ("00:12:30" → 12.30 s, typed with ":" instead of "."; a pool clip is not hours long).
+    static func parseTime(_ text: String, videoDuration: Double? = nil) -> Double? {
+        var normalized = text.applyingTransform(.fullwidthToHalfwidth, reverse: false) ?? text
+        normalized = normalized.trimmingCharacters(in: .whitespacesAndNewlines)
+        for colon in ["：", "︰", "∶", "分", "′", "'"] { normalized = normalized.replacingOccurrences(of: colon, with: ":") }
+        for decimal in ["，", ",", "。"] { normalized = normalized.replacingOccurrences(of: decimal, with: ".") }
+        for suffix in ["秒", "″", "\"", " "] { normalized = normalized.replacingOccurrences(of: suffix, with: "") }
+        if normalized.hasSuffix(":") { normalized += "0" }
+        let parts = normalized.split(separator: ":", omittingEmptySubsequences: false).map { String($0) }
         guard (1...3).contains(parts.count) else { return nil }
         var total = 0.0
         for part in parts {
-            guard let value = Double(part), value >= 0 else { return nil }
+            guard !part.isEmpty, let value = Double(part), value >= 0, value.isFinite else { return nil }
             total = total * 60 + value
         }
-        return total.isFinite ? total : nil
+        if parts.count == 3, let videoDuration, videoDuration > 0, total > videoDuration + durationTolerance,
+           parts[2].allSatisfy(\.isNumber), let minutes = Int(parts[0]), let seconds = Int(parts[1]),
+           let fraction = Double("0." + parts[2]) {
+            let alternative = Double(minutes) * 60 + Double(seconds) + fraction
+            if alternative <= videoDuration + durationTolerance { return alternative }
+        }
+        return total
     }
 }

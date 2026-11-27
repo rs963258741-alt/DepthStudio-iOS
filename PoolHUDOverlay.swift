@@ -46,6 +46,7 @@ struct PoolHUDOverlay: View {
                             .allowsHitTesting(isEditing)
                             .accessibilityElement(children: .ignore)
                             .accessibilityLabel(definition.title)
+                            .accessibilityValue(accessibilityText(definition.id))
                             .accessibilityIdentifier("hud.\(definition.id)")
                             .position(
                                 x: size.width * CGFloat(point.x / 100),
@@ -76,9 +77,16 @@ struct PoolHUDOverlay: View {
         default:
             if let spec = textSpec(for: id) {
                 HUDTextView(text: reading.flatMap { spec.live?($0) } ?? placeholder(for: id, spec: spec),
-                            look: spec.look, style: style, unit: unit)
+                            look: spec.look, style: style, unit: unit, unitLabel: spec.unit)
             }
         }
+    }
+
+    /// What a text field shows, for VoiceOver and the UI tests ("37.5 M", "00:41").
+    private func accessibilityText(_ id: String) -> String {
+        guard let spec = textSpec(for: id) else { return "" }
+        let text = reading.flatMap { spec.live?($0) } ?? placeholder(for: id, spec: spec)
+        return spec.unit.map { "\(text) \($0)" } ?? text
     }
 
     /// The export's text specs, so the preview and the video use the same texts and looks.
@@ -91,7 +99,7 @@ struct PoolHUDOverlay: View {
     private static func placeholderSpec(for id: String) -> PoolHUDLayerBuilder.TextSpec? {
         switch id {
         case "hudBrand": return .init(text: "● FREEDIVE / POOL DYNAMIC", look: .brand)
-        case "distanceUnit": return .init(text: "M", look: .unitLetter)
+        case "distanceValue": return .init(text: "0.0", look: .distanceValue, unit: "M")
         case "elapsedLabel": return .init(text: "DIVE TIME", look: .label)
         case "lapLabel": return .init(text: "LAP", look: .label)
         case "speedLabel": return .init(text: "SPEED", look: .label)

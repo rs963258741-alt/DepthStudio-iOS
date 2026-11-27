@@ -277,12 +277,18 @@ final class DiveVideoExporter {
                 layer = depthProfileLayer(chartSize: CGSize(width: size.width * 0.91, height: size.height * 0.18),
                                           samples: samples, maximumDepth: maximum, unit: unit,
                                           videoDuration: videoDuration, sync: sync, interpolator: interpolator, style: style)
+            case "depthGauge":
+                layer = DepthGaugeLayerBuilder(geometry: DepthGaugeGeometry(unit: unit, maximumDepth: maximum), style: style)
+                    .makeLayer(liveTimes: liveTimes, diveStart: diveStart, diveEnd: diveEnd, videoDuration: videoDuration) { time in
+                        reading(at: time)?.depthMeters
+                    }
             default:
                 guard let spec = Self.textSpec(for: item.id, maximumDepth: maximum, deviceName: settings.deviceName) else { continue }
                 let made = HUDLayerFactory.textItem(spec.text, look: spec.look, style: style, unit: unit,
-                                                    width: spec.live == nil ? nil : max(unit * 0.9, 10))
+                                                    width: spec.live == nil ? nil : max(unit * 0.9, 10),
+                                                    unitLabel: spec.unit)
                 if let live = spec.live {
-                    HUDLayerFactory.addSampledText(to: made.text, times: liveTimes, duration: videoDuration,
+                    HUDLayerFactory.addSampledText(to: made.texts, times: liveTimes, duration: videoDuration,
                                                    key: "hud-text-\(item.id)") { time in
                         reading(at: time).map(live) ?? spec.text
                     }
@@ -306,19 +312,21 @@ final class DiveVideoExporter {
     }
 
     /// Text of a depth HUD field: the static text (or placeholder) and, for live values,
-    /// how to read it from the dive data. The look is the one the preview uses.
+    /// how to read it from the dive data. The look is the one the preview uses. `unit` is
+    /// drawn at the value's bottom right as part of the same field (the depth value's "M").
     struct DepthTextSpec {
         var text: String
         var look: HUDTextLook
         var live: ((DiveReading) -> String)?
+        var unit: String?
     }
 
     static func textSpec(for id: String, maximumDepth: Double, deviceName: String) -> DepthTextSpec? {
         switch id {
         case "hudBrand": return DepthTextSpec(text: "● FREEDIVE / MISSION 02", look: .brand)
         case "hudClock": return DepthTextSpec(text: "00:00", look: .clock, live: { DiveVideoExporter.timeLabel($0.elapsedSeconds) })
-        case "depthValue": return DepthTextSpec(text: "--.-", look: .depthValue, live: { String(format: "%.1f", $0.depthMeters) })
-        case "depthUnit": return DepthTextSpec(text: "M", look: .unitLetter)
+        case "depthValue":
+            return DepthTextSpec(text: "--.-", look: .depthValue, live: { String(format: "%.1f", $0.depthMeters) }, unit: "M")
         case "elapsedValue": return DepthTextSpec(text: "--:--", look: .value, live: { DiveVideoExporter.timeLabel($0.elapsedSeconds) })
         case "elapsedLabel": return DepthTextSpec(text: "DIVE TIME", look: .label)
         case "tempValue":

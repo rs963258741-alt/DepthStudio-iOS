@@ -18,8 +18,7 @@ struct HUDItemDefinition: Identifiable, Hashable {
         .init(id: "hudBrand", title: "品牌文字"),
         .init(id: "hudClock", title: "影片時間"),
         .init(id: "identityGroup", title: "姓名、國旗與潛水種類"),
-        .init(id: "depthValue", title: "即時深度數值"),
-        .init(id: "depthUnit", title: "深度單位"),
+        .init(id: "depthValue", title: "即時深度數值與單位"),
         .init(id: "elapsedValue", title: "潛水時間數值"),
         .init(id: "elapsedLabel", title: "潛水時間標籤"),
         .init(id: "tempValue", title: "水溫數值"),
@@ -28,12 +27,14 @@ struct HUDItemDefinition: Identifiable, Hashable {
         .init(id: "speedLabel", title: "深度變化速度標籤"),
         .init(id: "profileTitle", title: "深度曲線標題"),
         .init(id: "profileBlock", title: "深度曲線圖"),
+        .init(id: "depthGauge", title: "垂直深度指示計"),
         .init(id: "footerBrand", title: "裝置名稱"),
         .init(id: "maxDepth", title: "最大深度")
     ]
 
-    /// Items shown only while the recorded dive covers the current video time.
-    static let liveIDs: Set<String> = ["hudClock", "depthValue", "depthUnit", "elapsedValue", "elapsedLabel",
+    /// Items shown only while the recorded dive covers the current video time. (The depth
+    /// unit is part of the depth value since 1.4, fixed at its bottom right.)
+    static let liveIDs: Set<String> = ["hudClock", "depthValue", "elapsedValue", "elapsedLabel",
                                        "tempValue", "tempLabel", "speedValue", "speedLabel"]
 }
 
@@ -80,8 +81,7 @@ struct HUDSettings: Codable, Equatable, HUDPresetSettings {
             "hudBrand": HUDPoint(x: 16, y: 3),
             "hudClock": HUDPoint(x: 88, y: 3),
             "identityGroup": HUDPoint(x: 25, y: 76),
-            "depthValue": HUDPoint(x: 17, y: 18),
-            "depthUnit": HUDPoint(x: 34, y: 24),
+            "depthValue": HUDPoint(x: 20, y: 18),
             "elapsedValue": HUDPoint(x: 55, y: 21),
             "elapsedLabel": HUDPoint(x: 55, y: 15),
             "tempValue": HUDPoint(x: 82, y: 21),
@@ -90,16 +90,17 @@ struct HUDSettings: Codable, Equatable, HUDPresetSettings {
             "speedLabel": HUDPoint(x: 82, y: 78),
             "profileTitle": HUDPoint(x: 30, y: 82),
             "profileBlock": HUDPoint(x: 50, y: 89),
+            "depthGauge": HUDPoint(x: 86, y: 46),
             "footerBrand": HUDPoint(x: 17, y: 96),
             "maxDepth": HUDPoint(x: 83, y: 96)
         ]
         transforms = Dictionary(uniqueKeysWithValues: HUDItemDefinition.all.map { ($0.id, HUDTransform()) })
         visibility = [
             "hudBrand": false, "hudClock": false, "identityGroup": true,
-            "depthValue": true, "depthUnit": true, "elapsedValue": true,
+            "depthValue": true, "elapsedValue": true,
             "elapsedLabel": true, "tempValue": true, "tempLabel": true,
             "speedValue": true, "speedLabel": true, "profileTitle": false,
-            "profileBlock": true, "footerBrand": false, "maxDepth": false
+            "profileBlock": true, "depthGauge": true, "footerBrand": false, "maxDepth": false
         ]
         opacity = 0.90
         fontScale = 0.90
@@ -147,6 +148,12 @@ struct HUDSettings: Codable, Equatable, HUDPresetSettings {
     func mergingDefaults() -> HUDSettings {
         var result = self
         let defaults = HUDSettings()
+        // Fields that no longer exist (the separate 深度單位 of 1.3) are dropped.
+        let known = Set(HUDItemDefinition.all.map(\.id))
+        result.positions = result.positions.filter { known.contains($0.key) }
+        result.transforms = result.transforms.filter { known.contains($0.key) }
+        result.visibility = result.visibility.filter { known.contains($0.key) }
+        result.styles = result.styles.filter { known.contains($0.key) }
         for item in HUDItemDefinition.all {
             if result.positions[item.id] == nil { result.positions[item.id] = defaults.positions[item.id] }
             if result.transforms[item.id] == nil { result.transforms[item.id] = HUDTransform() }
@@ -204,7 +211,6 @@ struct HUDSettings: Codable, Equatable, HUDPresetSettings {
     /// The colour a field's 「原色」 refers to.
     static func originalColor(for id: String) -> HUDColor {
         switch id {
-        case "depthUnit": return .cyan
         case "hudBrand", "elapsedLabel", "tempLabel", "speedLabel", "profileTitle", "footerBrand", "maxDepth": return .muted
         default: return .white
         }

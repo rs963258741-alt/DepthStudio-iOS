@@ -10,8 +10,7 @@ struct PoolHUDItemDefinition: Identifiable, Hashable {
         .init(id: "hudBrand", title: "品牌文字"),
         .init(id: "hudClock", title: "影片時間"),
         .init(id: "identityGroup", title: "姓名、國旗與項目"),
-        .init(id: "distanceValue", title: "累積距離數值"),
-        .init(id: "distanceUnit", title: "距離單位"),
+        .init(id: "distanceValue", title: "累積距離數值與單位"),
         .init(id: "elapsedValue", title: "閉氣時間數值"),
         .init(id: "elapsedLabel", title: "閉氣時間標籤"),
         .init(id: "lapValue", title: "目前趟次數值"),
@@ -25,7 +24,8 @@ struct PoolHUDItemDefinition: Identifiable, Hashable {
         .init(id: "averageSpeed", title: "平均速率")
     ]
 
-    /// Fields whose text changes with the video time.
+    /// Fields whose text changes with the video time. (The distance unit is part of the
+    /// distance value since 1.4, fixed at its bottom right.)
     static let liveIDs: Set<String> = ["hudClock", "distanceValue", "elapsedValue", "lapValue", "speedValue"]
 }
 
@@ -53,8 +53,7 @@ struct PoolHUDSettings: Codable, Equatable, HUDPresetSettings {
             "hudBrand": HUDPoint(x: 18, y: 3),
             "hudClock": HUDPoint(x: 88, y: 3),
             "identityGroup": HUDPoint(x: 27, y: 76),
-            "distanceValue": HUDPoint(x: 21, y: 18),
-            "distanceUnit": HUDPoint(x: 43, y: 24),
+            "distanceValue": HUDPoint(x: 24, y: 18),
             "elapsedValue": HUDPoint(x: 62, y: 21),
             "elapsedLabel": HUDPoint(x: 62, y: 15),
             "lapValue": HUDPoint(x: 85, y: 21),
@@ -70,7 +69,7 @@ struct PoolHUDSettings: Codable, Equatable, HUDPresetSettings {
         transforms = Dictionary(uniqueKeysWithValues: PoolHUDItemDefinition.all.map { ($0.id, HUDTransform()) })
         visibility = [
             "hudBrand": false, "hudClock": false, "identityGroup": true,
-            "distanceValue": true, "distanceUnit": true, "elapsedValue": true,
+            "distanceValue": true, "elapsedValue": true,
             "elapsedLabel": true, "lapValue": true, "lapLabel": true,
             "speedValue": true, "speedLabel": true, "profileTitle": false,
             "profileBlock": true, "footerBrand": true, "totalDistance": false,
@@ -127,6 +126,12 @@ struct PoolHUDSettings: Codable, Equatable, HUDPresetSettings {
     func mergingDefaults() -> PoolHUDSettings {
         var result = self
         let defaults = PoolHUDSettings()
+        // Fields that no longer exist (the separate 距離單位 of 1.3) are dropped.
+        let known = Set(PoolHUDItemDefinition.all.map(\.id))
+        result.positions = result.positions.filter { known.contains($0.key) }
+        result.transforms = result.transforms.filter { known.contains($0.key) }
+        result.visibility = result.visibility.filter { known.contains($0.key) }
+        result.styles = result.styles.filter { known.contains($0.key) }
         for item in PoolHUDItemDefinition.all {
             if result.positions[item.id] == nil { result.positions[item.id] = defaults.positions[item.id] }
             if result.transforms[item.id] == nil { result.transforms[item.id] = HUDTransform() }
@@ -181,7 +186,6 @@ struct PoolHUDSettings: Codable, Equatable, HUDPresetSettings {
     /// The colour a field's 「原色」 refers to.
     static func originalColor(for id: String) -> HUDColor {
         switch id {
-        case "distanceUnit": return .cyan
         case "hudBrand", "elapsedLabel", "lapLabel", "speedLabel", "profileTitle", "footerBrand",
              "totalDistance", "averageSpeed": return .muted
         default: return .white

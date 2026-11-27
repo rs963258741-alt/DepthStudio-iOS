@@ -259,22 +259,54 @@ extension View {
 }
 
 /// One HUD text with its look and the user's style, as shown in the preview.
+///
+/// With `unitLabel` (the live depth / distance value) the unit is part of the same field:
+/// on the value's baseline right after it, i.e. at its bottom right, and it cannot be moved
+/// on its own. Like the export (HUDValueUnitLine), the value and the unit each draw the
+/// whole line with the other part transparent, so each keeps its own colour and glow.
 struct HUDTextView: View {
     let text: String
     let look: HUDTextLook
     let style: HUDItemStyle
     let unit: CGFloat
+    var unitLabel: String? = nil
+    var unitLook: HUDTextLook = .unitLetter
 
     var body: some View {
         let point = HUDMetrics.point(unit: unit)
-        Text(text)
+        Group {
+            if let unitLabel {
+                ZStack {
+                    line(unitLabel, showing: .value, point: point)
+                        .shadow(color: style.glow(.cyan).swiftUI.opacity(style.glowOpacity(look.glow)), radius: look.glowRadius * point)
+                    line(unitLabel, showing: .unit, point: point)
+                        .shadow(color: style.glow(.cyan).swiftUI.opacity(style.glowOpacity(unitLook.glow)), radius: unitLook.glowRadius * point)
+                }
+            } else {
+                Text(text)
+                    .font(look.swiftUIFont(unit: unit))
+                    .tracking(look.tracking * point)
+                    .foregroundStyle(style.text(look.color).swiftUI)
+                    .shadow(color: style.glow(.cyan).swiftUI.opacity(style.glowOpacity(look.glow)), radius: look.glowRadius * point)
+            }
+        }
+        .hudDarkShadow(look.darkShadow, point: point)
+        .fixedSize()
+        .hudDropShadow(style, point: point)
+    }
+
+    /// "value unit" in one line (fonts on a shared baseline), showing only one part.
+    private func line(_ unitLabel: String, showing part: HUDValueUnitLine.Part, point: CGFloat) -> Text {
+        let value = Text(text)
             .font(look.swiftUIFont(unit: unit))
             .tracking(look.tracking * point)
-            .foregroundStyle(style.text(look.color).swiftUI)
-            .shadow(color: style.glow(.cyan).swiftUI.opacity(style.glowOpacity(look.glow)), radius: look.glowRadius * point)
-            .hudDarkShadow(look.darkShadow, point: point)
-            .fixedSize()
-            .hudDropShadow(style, point: point)
+            .foregroundStyle(part == .value ? style.text(look.color).swiftUI : Color.clear)
+        let gap = Text(HUDValueUnitLine.gap).font(unitLook.swiftUIFont(unit: unit)).foregroundStyle(Color.clear)
+        let unitText = Text(unitLabel)
+            .font(unitLook.swiftUIFont(unit: unit))
+            .tracking(unitLook.tracking * point)
+            .foregroundStyle(part == .unit ? style.text(unitLook.color).swiftUI : Color.clear)
+        return value + gap + unitText
     }
 }
 

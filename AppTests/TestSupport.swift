@@ -218,6 +218,37 @@ enum PixelCompare {
         return count > 0 ? total / Double(count) : 0
     }
 
+    /// Bounding box and mean centre (pixels, origin top left) of the pixels of `image`
+    /// (drawn at its own size) that match `test(r, g, b, a)`, optionally only inside
+    /// `region` (pixels). Nil if none match.
+    static func box(_ image: CGImage, region: CGRect? = nil,
+                    where test: (Int, Int, Int, Int) -> Bool) -> (rect: CGRect, center: CGPoint, count: Int)? {
+        let size = CGSize(width: image.width, height: image.height)
+        let p = pixels(image, size: size)
+        let width = image.width, height = image.height
+        let area = (region ?? CGRect(origin: .zero, size: size)).intersection(CGRect(origin: .zero, size: size))
+        guard !area.isNull else { return nil }
+        var minX = Int.max, minY = Int.max, maxX = -1, maxY = -1, count = 0
+        var sumX = 0.0, sumY = 0.0
+        for row in Int(area.minY)..<min(height, Int(area.maxY)) {
+            for column in Int(area.minX)..<min(width, Int(area.maxX)) {
+                let i = (row * width + column) * 4
+                guard test(Int(p[i]), Int(p[i + 1]), Int(p[i + 2]), Int(p[i + 3])) else { continue }
+                minX = min(minX, column); maxX = max(maxX, column)
+                minY = min(minY, row); maxY = max(maxY, row)
+                sumX += Double(column); sumY += Double(row); count += 1
+            }
+        }
+        guard count > 0 else { return nil }
+        return (CGRect(x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1),
+                CGPoint(x: sumX / Double(count), y: sumY / Double(count)), count)
+    }
+
+    /// Crop of `image` (pixels, origin top left).
+    static func crop(_ image: CGImage, _ rect: CGRect) -> CGImage? {
+        image.cropping(to: rect.integral)
+    }
+
     /// A box around a HUD position given in % of the frame.
     static func region(around point: HUDPoint, halfWidth: CGFloat = 0.05, halfHeight: CGFloat = 0.03) -> CGRect {
         CGRect(x: CGFloat(point.x / 100) - halfWidth, y: CGFloat(point.y / 100) - halfHeight,

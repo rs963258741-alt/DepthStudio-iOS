@@ -183,9 +183,11 @@ final class ExportPipelineTests: XCTestCase {
         let exportedFrame = try await exportedFrame(result, at: 1.5)
         let bare = try XCTUnwrap(Self.bitmap(bareBackground, size: size, colorSpace: exportedFrame.colorSpace))
         for id in ["elapsedValue", "elapsedLabel", "tempValue", "tempLabel", "speedValue", "speedLabel",
-                   "depthUnit", "identityGroup", "profileBlock"] {
+                   "identityGroup", "profileBlock", "depthGauge"] {
             let region = id == "profileBlock"
                 ? PixelCompare.region(around: settings.positions[id]!, halfWidth: 0.42, halfHeight: 0.08)
+                : id == "depthGauge"
+                ? PixelCompare.region(around: settings.positions[id]!, halfWidth: 0.09, halfHeight: 0.12)
                 : PixelCompare.region(around: settings.positions[id]!)
             let alpha = PixelCompare.meanAlpha(overlay, size: compareSize, region: region)
             XCTAssertGreaterThan(alpha, 3, "\(id) should be drawn at 1.5 s (alpha \(alpha))")

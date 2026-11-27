@@ -93,29 +93,71 @@ enum HUDLayerFactory {
 
     /// One HUD text item with its look and the user's style, the export twin of HUDTextView.
     /// `width` is the box width (the text is centred in it); live values need room for
-    /// their longest text.
+    /// their longest text. With `unitLabel` (the live depth / distance value) the unit is
+    /// part of the same block, at the value's bottom right (on its baseline), like
+    /// HUDTextView: two text layers draw the same "value unit" line, one showing only the
+    /// value and one only the unit, so each part keeps its own colour and glow.
     static func textItem(_ string: String, look: HUDTextLook, style: HUDItemStyle, unit: CGFloat,
-                         width: CGFloat? = nil) -> (item: CALayer, text: CATextLayer) {
+                         width: CGFloat? = nil, unitLabel: String? = nil,
+                         unitLook: HUDTextLook = .unitLetter) -> HUDTextItem {
         let pt = HUDMetrics.point(unit: unit)
         let font = look.uiFont(unit: unit)
         let tracking = look.tracking * pt
-        let boxWidth = width ?? (textWidth(string, font: font, tracking: tracking) + 12 * pt)
-        let box = CGRect(x: 0, y: 0, width: max(10, boxWidth), height: lineHeight(of: font) * 1.2)
-        let text = self.text(string, in: box, font: font, color: style.text(look.color).uiColor,
-                             tracking: tracking, glowColor: style.glow(.cyan).uiColor,
-                             glowOpacity: Float(style.glowOpacity(look.glow)), glowRadius: look.glowRadius * pt)
-        var content: CALayer = text
+        let texts: [CATextLayer]
+        let box: CGRect
+        if let unitLabel {
+            let line = HUDValueUnitLine(valueFont: font, valueTracking: tracking, valueColor: style.text(look.color).uiColor,
+                                        unitLabel: unitLabel, unitFont: unitLook.uiFont(unit: unit),
+                                        unitTracking: unitLook.tracking * pt, unitColor: style.text(unitLook.color).uiColor)
+            let boxWidth = width ?? (ceil(line.string(string, part: .value).size().width) + 12 * pt)
+            box = CGRect(x: 0, y: 0, width: max(10, boxWidth), height: lineHeight(of: font) * 1.2)
+            let valueLayer = formattedText(string, in: box, lineFont: font, format: { line.string($0, part: .value) },
+                                           glowColor: style.glow(.cyan).uiColor,
+                                           glowOpacity: Float(style.glowOpacity(look.glow)), glowRadius: look.glowRadius * pt)
+            let unitLayer = formattedText(string, in: box, lineFont: font, format: { line.string($0, part: .unit) },
+                                          glowColor: style.glow(.cyan).uiColor,
+                                          glowOpacity: Float(style.glowOpacity(unitLook.glow)), glowRadius: unitLook.glowRadius * pt)
+            texts = [valueLayer, unitLayer]
+        } else {
+            let boxWidth = width ?? (textWidth(string, font: font, tracking: tracking) + 12 * pt)
+            box = CGRect(x: 0, y: 0, width: max(10, boxWidth), height: lineHeight(of: font) * 1.2)
+            texts = [text(string, in: box, font: font, color: style.text(look.color).uiColor,
+                          tracking: tracking, glowColor: style.glow(.cyan).uiColor,
+                          glowOpacity: Float(style.glowOpacity(look.glow)), glowRadius: look.glowRadius * pt)]
+        }
+        var content: CALayer
+        if texts.count == 1 {
+            content = texts[0]
+        } else {
+            content = CALayer()
+            content.contentsScale = 1
+            content.frame = box
+            for layer in texts { content.addSublayer(layer) }
+        }
         if look.darkShadow {
             content = shadowGroup(content, bounds: box, color: .black, opacity: 0.65, radius: 3 * pt, offsetY: 2 * pt)
         }
         content = applyDropShadow(style, to: content, bounds: box, point: pt)
-        // `content` is the text layer itself (already centred in the box) or a shadow
-        // group with the box's frame.
+        // `content` is the text layer itself (already centred in the box) or a group with
+        // the box's frame.
         let item = CALayer()
         item.contentsScale = 1
         item.bounds = box
         item.addSublayer(content)
-        return (item, text)
+        return HUDTextItem(item: item, texts: texts)
+    }
+
+    /// A text layer whose text is built by `format` (an attributed string) from a plain
+    /// value, also when the value changes over the video's time.
+    static func formattedText(_ value: String, in rect: CGRect, lineFont: UIFont,
+                              format: @escaping (String) -> NSAttributedString,
+                              glowColor: UIColor, glowOpacity: Float, glowRadius: CGFloat) -> CATextLayer {
+        let layer = text("", in: rect, font: lineFont, color: .white, glowColor: glowColor,
+                         glowOpacity: glowOpacity, glowRadius: glowRadius)
+        let tracks = HUDLayerTracks.of(layer)
+        tracks.format = format
+        tracks.show(value, on: layer)
+        return layer
     }
 
     static func line(_ points: [CGPoint], color: UIColor, width: CGFloat,
@@ -163,7 +205,11 @@ enum HUDLayerFactory {
     static func addTextAnimation(to layer: CATextLayer, values: [String], starts: [Double],
                                  duration: Double, key: String) {
         guard let first = values.first, values.count == starts.count else { return }
-        HUDLayerTracks.setString(first, on: layer)
+        if let tracks = HUDLayerTracks.existing(on: layer) {
+            tracks.show(first, on: layer)
+        } else {
+            HUDLayerTracks.setString(first, on: layer)
+        }
         guard values.count > 1 else { return }
         let tracks = HUDLayerTracks.of(layer)
         tracks.textValues = values
@@ -172,6 +218,12 @@ enum HUDLayerFactory {
 
     /// Text values sampled at `times`; consecutive repeats are merged.
     static func addSampledText(to layer: CATextLayer, times: [Double], duration: Double, key: String,
+                               value: (Double) -> String) {
+        addSampledText(to: [layer], times: times, duration: duration, key: key, value: value)
+    }
+
+    /// The same sampled values on several text layers (a value and its unit).
+    static func addSampledText(to layers: [CATextLayer], times: [Double], duration: Double, key: String,
                                value: (Double) -> String) {
         var values: [String] = []
         var starts: [Double] = []
@@ -182,7 +234,9 @@ enum HUDLayerFactory {
                 starts.append(time)
             }
         }
-        addTextAnimation(to: layer, values: values, starts: starts, duration: duration, key: key)
+        for layer in layers {
+            addTextAnimation(to: layer, values: values, starts: starts, duration: duration, key: key)
+        }
     }
 
     /// Position (in the superlayer) at the given video times, linear in between, held
@@ -275,6 +329,10 @@ final class HUDLayerTracks: NSObject {
     var positions: [CGPoint] = []
     /// Shown only inside this range (video seconds); nil = always.
     var visibleRange: ClosedRange<Double>?
+    /// Builds the layer's attributed text from a value (a value with its unit); nil for
+    /// plain text, whose font and colour are kept by `setString`.
+    var format: ((String) -> NSAttributedString)?
+    private var shownValue: String?
 
     /// The tracks of `layer`, created if needed.
     static func of(_ layer: CALayer) -> HUDLayerTracks {
@@ -320,6 +378,18 @@ final class HUDLayerTracks: NSObject {
         return found
     }
 
+    /// Shows `value` on the text layer: through `format` if the layer has one, otherwise
+    /// keeping the layer's font, colour and tracking.
+    func show(_ value: String, on layer: CATextLayer) {
+        guard let format else {
+            Self.setString(value, on: layer)
+            return
+        }
+        guard value != shownValue else { return }
+        shownValue = value
+        layer.string = format(value)
+    }
+
     /// Sets a text layer's string, keeping the font, colour and tracking of an attributed string.
     static func setString(_ value: String, on layer: CATextLayer) {
         if let attributed = layer.string as? NSAttributedString, attributed.length > 0 {
@@ -329,4 +399,46 @@ final class HUDLayerTracks: NSObject {
             layer.string = value
         }
     }
+}
+
+/// A HUD text item built by HUDLayerFactory.textItem: the placed box and its text layers
+/// (one, or the value and the unit of a value block).
+struct HUDTextItem {
+    let item: CALayer
+    let texts: [CATextLayer]
+    var text: CATextLayer { texts[0] }
+}
+
+/// The "value unit" line of the live depth / distance value: the value in its big font
+/// and the unit in its small font on the same baseline, so the unit sits at the value's
+/// bottom right. The value and the unit are drawn by separate layers (each with its own
+/// glow), each showing its part over the same full line so both line up exactly.
+struct HUDValueUnitLine {
+    enum Part { case value, unit }
+
+    let valueFont: UIFont
+    let valueTracking: CGFloat
+    let valueColor: UIColor
+    let unitLabel: String
+    let unitFont: UIFont
+    let unitTracking: CGFloat
+    let unitColor: UIColor
+
+    func string(_ value: String, part: Part) -> NSAttributedString {
+        let line = NSMutableAttributedString(string: value, attributes: [
+            .font: valueFont, .kern: valueTracking,
+            .foregroundColor: part == .value ? valueColor : UIColor.clear
+        ])
+        line.append(NSAttributedString(string: HUDValueUnitLine.gap, attributes: [
+            .font: unitFont, .foregroundColor: UIColor.clear
+        ]))
+        line.append(NSAttributedString(string: unitLabel, attributes: [
+            .font: unitFont, .kern: unitTracking,
+            .foregroundColor: part == .unit ? unitColor : UIColor.clear
+        ]))
+        return line
+    }
+
+    /// Space between the value and the unit (in the unit's font).
+    static let gap = " "
 }
