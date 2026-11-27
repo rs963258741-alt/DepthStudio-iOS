@@ -50,6 +50,22 @@ final class HUDOverlayRenderer {
             collect(layer, into: item, isRoot: true)
             items.append(item)
         }
+        // The layers are usually built on a background thread. Draw every text layer and
+        // commit, so they render on the compositor's thread too (uncommitted text layers
+        // came out blank in the export while the values that were set later did show).
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        Self.drawText(in: root)
+        CATransaction.commit()
+        CATransaction.flush()
+    }
+
+    private static func drawText(in layer: CALayer) {
+        if let text = layer as? CATextLayer {
+            text.setNeedsDisplay()
+            text.displayIfNeeded()
+        }
+        for sublayer in layer.sublayers ?? [] { drawText(in: sublayer) }
     }
 
     var isEmpty: Bool { items.isEmpty }
@@ -76,7 +92,10 @@ final class HUDOverlayRenderer {
     func overlay(at time: Double) -> CIImage {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        defer { CATransaction.commit() }
+        defer {
+            CATransaction.commit()
+            CATransaction.flush()
+        }
         var result = CIImage.empty()
         for item in items {
             guard item.visibility?.isVisible(at: time) ?? true else { continue }
@@ -95,6 +114,7 @@ final class HUDOverlayRenderer {
         for entry in item.texts {
             let value = entry.tracks.text(at: time) ?? ""
             HUDLayerTracks.setString(value, on: entry.layer)
+            entry.layer.displayIfNeeded()
             parts.append(value)
         }
         for entry in item.toggles {

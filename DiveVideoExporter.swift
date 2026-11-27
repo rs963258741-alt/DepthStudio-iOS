@@ -122,7 +122,7 @@ final class DiveVideoExporter {
                     preferredTransform: preferredTransform,
                     sourceFrameDuration: sourceFrameDuration,
                     renderSize: renderSize,
-                    hud: makeHUD(renderSize, duration.seconds)
+                    hud: Self.committedHUD { makeHUD(renderSize, duration.seconds) }
                 )
 
                 try? FileManager.default.removeItem(at: outputURL)
@@ -173,6 +173,17 @@ final class DiveVideoExporter {
                 completion(.failure(error))
             }
         }
+    }
+
+    /// Builds the HUD layers in their own transaction and commits it, so their state is
+    /// visible on the compositor's thread.
+    static func committedHUD(_ build: () -> CALayer) -> CALayer {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        let hud = build()
+        CATransaction.commit()
+        CATransaction.flush()
+        return hud
     }
 
     /// Output frame rate: the source's, capped at 60 fps (120/240 fps clips would multiply

@@ -187,13 +187,12 @@ enum PixelCompare {
         let width = Int(size.width), height = Int(size.height)
         let area = region ?? CGRect(x: 0, y: 0, width: 1, height: 1)
         let x0 = max(0, Int(area.minX * CGFloat(width))), x1 = min(width, Int(area.maxX * CGFloat(width)))
-        // CGContext rows start at the bottom; the region's y is from the top.
+        // A bitmap context's first row in memory is the top of the image, like the region's y.
         let y0 = max(0, Int(area.minY * CGFloat(height))), y1 = min(height, Int(area.maxY * CGFloat(height)))
         var total = 0.0, count = 0
         for row in y0..<max(y0, y1) {
-            let bufferRow = height - 1 - row
             for column in x0..<max(x0, x1) {
-                let index = (bufferRow * width + column) * 4
+                let index = (row * width + column) * 4
                 total += Double(abs(Int(pa[index]) - Int(pb[index])))
                 total += Double(abs(Int(pa[index + 1]) - Int(pb[index + 1])))
                 total += Double(abs(Int(pa[index + 2]) - Int(pb[index + 2])))
@@ -212,7 +211,7 @@ enum PixelCompare {
         var total = 0.0, count = 0
         for row in y0..<max(y0, y1) {
             for column in x0..<max(x0, x1) {
-                total += Double(p[((height - 1 - row) * width + column) * 4 + 3])
+                total += Double(p[(row * width + column) * 4 + 3])
                 count += 1
             }
         }

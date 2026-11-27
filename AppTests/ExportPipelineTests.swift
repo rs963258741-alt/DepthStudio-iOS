@@ -175,14 +175,22 @@ final class ExportPipelineTests: XCTestCase {
         print("[export-test] depth value region: own time \(own), other time \(other)")
         XCTAssertGreaterThan(other, own + 4, "the depth value must change between 1.5 s and 3.0 s")
 
-        // DIVE TIME, WATER TEMP and the chart are drawn during the dive.
+        // DIVE TIME, WATER TEMP, the labels, the name and the chart are drawn: in the HUD
+        // itself and in the exported frame (compared with the bare video frame).
         let overlay = try XCTUnwrap(renderer.still(at: 1.5))
-        for id in ["elapsedValue", "elapsedLabel", "tempValue", "tempLabel", "profileBlock", "speedValue"] {
+        let bareBackground = try await sourceFrame(source, at: 1.5, size: size)
+        let bare = try XCTUnwrap(Self.bitmap(bareBackground, size: size))
+        let exportedFrame = try await exportedFrame(result, at: 1.5)
+        for id in ["elapsedValue", "elapsedLabel", "tempValue", "tempLabel", "speedValue", "speedLabel",
+                   "depthUnit", "identityGroup", "profileBlock"] {
             let region = id == "profileBlock"
                 ? PixelCompare.region(around: settings.positions[id]!, halfWidth: 0.42, halfHeight: 0.08)
                 : PixelCompare.region(around: settings.positions[id]!)
             let alpha = PixelCompare.meanAlpha(overlay, size: compareSize, region: region)
             XCTAssertGreaterThan(alpha, 3, "\(id) should be drawn at 1.5 s (alpha \(alpha))")
+            let drawn = PixelCompare.meanDifference(bare, exportedFrame, size: compareSize, region: region)
+            print("[export-test] \(id): HUD alpha \(alpha), exported frame vs bare video \(drawn)")
+            XCTAssertGreaterThan(drawn, 3, "\(id) should be in the exported frame at 1.5 s")
         }
     }
 
@@ -323,6 +331,14 @@ final class ExportPipelineTests: XCTestCase {
                            name: "stage-vs-floating-preview.png")
         print("[export-test] stage vs small preview difference \(difference)")
         XCTAssertLessThan(difference, 6, "the small preview should be the stage scaled down")
+    }
+
+    /// A Core Image frame as a bitmap (no colour conversion, like the export).
+    private static func bitmap(_ image: CIImage, size: CGSize) -> CGImage? {
+        let context = CIContext(options: [.workingColorSpace: NSNull(), .outputColorSpace: NSNull()])
+        let frame = CGRect(origin: .zero, size: size)
+        return context.createCGImage(image.cropped(to: frame), from: frame, format: .RGBA8,
+                                     colorSpace: CGColorSpace(name: CGColorSpace.sRGB))
     }
 
     /// `image` scaled to fill `size` with a centre crop, like the export.
