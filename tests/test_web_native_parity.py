@@ -18,7 +18,7 @@ class WebV818NativeParityTests(unittest.TestCase):
         self.assertEqual(set(web_ids), set(native_ids))
         self.assertEqual(len(web_ids), 15)
         for item_id in web_ids:
-            self.assertIn(f'case "{item_id}"', HUD)
+            self.assertIn(f'case "{item_id}"', HUD + EXPORTER)
 
     def test_native_defaults_match_web_layout_and_visibility(self):
         layout_match = re.search(r'const DEFAULT_LAYOUT=\{([^}]+)\}', WEB)
@@ -54,7 +54,8 @@ class WebV818NativeParityTests(unittest.TestCase):
             self.assertIn(marker, CONTENT)
         for action in ["恢復預設位置", "重設此項目", "全部顯示", "全部隱藏", "重設外觀"]:
             self.assertIn(action, CONTENT)
-        self.assertIn("threshold (2%", HUD) if "threshold (2%" in HUD else self.assertIn("< 2", HUD)
+        self.assertIn("(threshold 2% of stage)", HUD)
+        self.assertIn("static let threshold = 2.0", (ROOT / "StudioShared.swift").read_text(encoding="utf-8"))
         self.assertIn("UserDefaults", SETTINGS)
 
     def test_native_has_video_data_import_preview_and_platform_export(self):
@@ -63,7 +64,7 @@ class WebV818NativeParityTests(unittest.TestCase):
         self.assertIn("AtmosUDDFParser().parse", CONTENT)
         self.assertIn("aspectRatio(9.0 / 16.0", CONTENT + (ROOT / "DiveVideoPreview.swift").read_text(encoding="utf-8"))
         self.assertIn("ExportSizing.renderSize(aspect:", EXPORTER)
-        self.assertIn("AVVideoCompositionCoreAnimationTool", EXPORTER)
+        self.assertIn("HUDVideoCompositor", EXPORTER)
         self.assertIn("countCompressedVideoSamples", EXPORTER)
         self.assertIn("decodeFirstVideoFrame", EXPORTER)
         self.assertIn("PHPhotoLibrary.shared().performChanges", CONTENT)

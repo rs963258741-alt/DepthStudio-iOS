@@ -57,7 +57,7 @@ struct HUDCountryOption: Identifiable, Hashable {
     }
 }
 
-struct HUDSettings: Codable, Equatable {
+struct HUDSettings: Codable, Equatable, HUDPresetSettings {
     static let storageKey = "depthstudio.native.hud-settings.v1"
     static let diveTypes = ["CWTB", "CNF", "CWT", "FIM", "VWT", "DPV"]
 
@@ -72,6 +72,8 @@ struct HUDSettings: Codable, Equatable {
     var country: String
     var identityScale: Double
     var divingType: String
+    /// 字體顏色、陰影、對比 of each field; fields without an entry keep their original look.
+    var styles: [String: HUDItemStyle]
 
     init() {
         positions = [
@@ -107,6 +109,26 @@ struct HUDSettings: Codable, Equatable {
         country = "chinesetaipei"
         identityScale = 0.80
         divingType = "CWTB"
+        styles = [:]
+    }
+
+    /// Settings saved by older versions have no `styles` (and could lack other keys):
+    /// missing values fall back to the defaults instead of discarding the whole settings.
+    init(from decoder: Decoder) throws {
+        let defaults = HUDSettings()
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        positions = try c.decodeIfPresent([String: HUDPoint].self, forKey: .positions) ?? defaults.positions
+        transforms = try c.decodeIfPresent([String: HUDTransform].self, forKey: .transforms) ?? defaults.transforms
+        visibility = try c.decodeIfPresent([String: Bool].self, forKey: .visibility) ?? defaults.visibility
+        opacity = try c.decodeIfPresent(Double.self, forKey: .opacity) ?? defaults.opacity
+        fontScale = try c.decodeIfPresent(Double.self, forKey: .fontScale) ?? defaults.fontScale
+        verticalOffset = try c.decodeIfPresent(Double.self, forKey: .verticalOffset) ?? defaults.verticalOffset
+        syncOffset = try c.decodeIfPresent(Double.self, forKey: .syncOffset) ?? defaults.syncOffset
+        displayName = try c.decodeIfPresent(String.self, forKey: .displayName) ?? defaults.displayName
+        country = try c.decodeIfPresent(String.self, forKey: .country) ?? defaults.country
+        identityScale = try c.decodeIfPresent(Double.self, forKey: .identityScale) ?? defaults.identityScale
+        divingType = try c.decodeIfPresent(String.self, forKey: .divingType) ?? defaults.divingType
+        styles = (try? c.decodeIfPresent([String: HUDItemStyle].self, forKey: .styles)) ?? [:]
     }
 
     static func load() -> HUDSettings {
@@ -137,41 +159,54 @@ struct HUDSettings: Codable, Equatable {
         result.identityScale = min(1.8, max(0.6, result.identityScale))
         if !Self.diveTypes.contains(result.divingType) { result.divingType = "CWTB" }
         if HUDCountryOption.assetName(for: result.country) == nil { result.country = "chinesetaipei" }
+        result.styles = result.styles.mapValues(\.sanitized).filter { !$0.value.isDefault }
         return result
     }
 
-    /// Key of the user's own default layout (「將目前排版設為預設」).
-    static let customDefaultLayoutKey = "depthstudio.native.hud-default-layout.v1"
+    static var builtIn: HUDSettings { HUDSettings() }
 
-    /// The user's saved default layout, if they have set one.
+    /// Key of preset 1 (「將目前排版設為預設1」), which 「恢復預設位置」 restores. It is the
+    /// key the single 「將目前排版設為預設」 of version 1.2 used, so that layout becomes preset 1.
+    static let customDefaultLayoutKey = "depthstudio.native.hud-default-layout.v1"
+    static let presetKeys = [1: customDefaultLayoutKey, 2: "depthstudio.native.hud-layout-preset2.v1"]
+
+    /// The user's saved default layout (preset 1), if they have set one.
     static func customDefaultLayout(in store: UserDefaults = .standard) -> HUDLayoutPreset? {
-        HUDLayoutPresetStore.load(key: customDefaultLayoutKey, from: store)
+        preset(1, in: store)
     }
 
-    /// Saves the current positions and per-item size/rotation as the default that
-    /// 「恢復預設位置」 restores, including after the app restarts.
+    /// Saves the current layout and look as preset 1, the default that 「恢復預設位置」
+    /// restores, including after the app restarts.
     func saveLayoutAsDefault(in store: UserDefaults = .standard) {
-        HUDLayoutPresetStore.save(HUDLayoutPreset(positions: positions, transforms: transforms),
-                                  key: Self.customDefaultLayoutKey, to: store)
+        savePreset(1, in: store)
     }
 
     static func clearCustomDefaultLayout(in store: UserDefaults = .standard) {
-        HUDLayoutPresetStore.clear(key: customDefaultLayoutKey, in: store)
+        clearPreset(1, in: store)
     }
 
-    /// Restores the user's default layout if one is saved, otherwise the built-in layout.
+    /// Restores the positions and per-item size/rotation of preset 1 if it is saved,
+    /// otherwise the built-in layout.
     mutating func resetLayout(using store: UserDefaults = .standard) {
-        let builtIn = HUDSettings()
-        if let preset = Self.customDefaultLayout(in: store) {
-            positions = builtIn.positions.merging(preset.positions) { _, custom in custom }
-            transforms = builtIn.transforms.merging(preset.transforms) { _, custom in custom }
-        } else {
-            positions = builtIn.positions
-            transforms = builtIn.transforms
-        }
+        restoreDefaultPositions(using: store)
     }
 
     mutating func setAllVisible(_ visible: Bool) {
         for item in HUDItemDefinition.all { visibility[item.id] = visible }
+    }
+
+    func style(for id: String) -> HUDItemStyle { styles[id] ?? HUDItemStyle() }
+
+    mutating func setStyle(_ style: HUDItemStyle, for id: String) {
+        styles[id] = style.isDefault ? nil : style.sanitized
+    }
+
+    /// The colour a field's 「原色」 refers to.
+    static func originalColor(for id: String) -> HUDColor {
+        switch id {
+        case "depthUnit": return .cyan
+        case "hudBrand", "elapsedLabel", "tempLabel", "speedLabel", "profileTitle", "footerBrand", "maxDepth": return .muted
+        default: return .white
+        }
     }
 }

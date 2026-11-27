@@ -36,6 +36,9 @@ targets:
       - path: PoolMotionAnalyzer.swift
       - path: StudioShared.swift
       - path: HUDLayerFactory.swift
+      - path: HUDStyle.swift
+      - path: HUDVideoCompositor.swift
+      - path: UITestSupport.swift
       - path: DepthStudioApp.swift
       - path: HUDSettings.swift
       - path: DiveDataInterpolator.swift
@@ -56,7 +59,7 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         PRODUCT_MODULE_NAME: DepthStudio
         TARGETED_DEVICE_FAMILY: "1"
-        MARKETING_VERSION: "1.2.0"
+        MARKETING_VERSION: "1.3.0"
         CURRENT_PROJECT_VERSION: "4"
         INFOPLIST_KEY_UILaunchStoryboardName: LaunchScreen
         PRODUCT_BUNDLE_IDENTIFIER: com.bananaflow.depthstudio

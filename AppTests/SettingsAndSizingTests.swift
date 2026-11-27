@@ -3,22 +3,40 @@ import AVFoundation
 @testable import DepthStudio
 
 final class ExportSizingTests: XCTestCase {
-    func testStandardShapesHaveExactFourKSizes() {
-        XCTAssertEqual(ExportSizing.renderSize(aspect: 9.0 / 16.0), CGSize(width: 2160, height: 3840))
-        XCTAssertEqual(ExportSizing.renderSize(aspect: 16.0 / 9.0), CGSize(width: 3840, height: 2160))
-        XCTAssertEqual(ExportSizing.renderSize(aspect: 1), CGSize(width: 2880, height: 2880))
+    func testOutputFollowsTheSourceQuality() {
+        let uhdPortrait = CGSize(width: 2160, height: 3840), uhd = CGSize(width: 3840, height: 2160)
+        let hd = CGSize(width: 1920, height: 1080)
+        // 4K source → 4K output in every shape.
+        XCTAssertEqual(ExportSizing.renderSize(aspect: 9.0 / 16.0, sourceSize: uhdPortrait), CGSize(width: 2160, height: 3840))
+        XCTAssertEqual(ExportSizing.renderSize(aspect: 16.0 / 9.0, sourceSize: uhdPortrait), CGSize(width: 3840, height: 2160))
+        XCTAssertEqual(ExportSizing.renderSize(aspect: 1, sourceSize: uhd), CGSize(width: 2880, height: 2880))
+        // 1080p source → 1080p output.
+        XCTAssertEqual(ExportSizing.renderSize(aspect: 9.0 / 16.0, sourceSize: hd), CGSize(width: 1080, height: 1920))
+        XCTAssertEqual(ExportSizing.renderSize(aspect: 16.0 / 9.0, sourceSize: hd), CGSize(width: 1920, height: 1080))
+        XCTAssertEqual(ExportSizing.renderSize(aspect: 1, sourceSize: hd), CGSize(width: 1440, height: 1440))
+        // 720p stays 720p; sources above 4K are limited to 4K.
+        XCTAssertEqual(ExportSizing.renderSize(aspect: 16.0 / 9.0, sourceSize: CGSize(width: 1280, height: 720)), CGSize(width: 1280, height: 720))
+        XCTAssertEqual(ExportSizing.renderSize(aspect: 16.0 / 9.0, sourceSize: CGSize(width: 5312, height: 2988)), CGSize(width: 3840, height: 2160))
+        XCTAssertEqual(ExportSizing.qualityLabel(for: CGSize(width: 2160, height: 3840)), "4K")
+        XCTAssertEqual(ExportSizing.qualityLabel(for: CGSize(width: 2880, height: 2880)), "4K")
+        XCTAssertEqual(ExportSizing.qualityLabel(for: CGSize(width: 1080, height: 1920)), "1080P")
+        XCTAssertEqual(ExportSizing.qualityLabel(for: CGSize(width: 1440, height: 1440)), "1080P")
+        XCTAssertEqual(ExportSizing.qualityLabel(for: CGSize(width: 720, height: 1280)), "720P")
     }
 
-    func testEveryShapeIsFourKClassEvenAndWithinH264Limits() {
-        for aspect in OutputAspect.allCases {
-            for source in [0.5625, 0.75, 1.0, 1.7778] as [CGFloat] {
-                let ratio = aspect.ratio(source: source)
-                let size = ExportSizing.renderSize(aspect: ratio)
-                XCTAssertTrue(ExportSizing.isFourKClass(size), "\(aspect) \(size)")
-                XCTAssertEqual(Int(size.width) % 2, 0)
-                XCTAssertEqual(Int(size.height) % 2, 0)
-                XCTAssertEqual(size.width / size.height, ratio, accuracy: ratio * 0.01, "\(aspect)")
-                XCTAssertLessThanOrEqual(size.width * size.height, 9_437_184, "H.264 level 5.2 frame size")
+    func testEveryShapeIsEvenProportionedAndWithinH264Limits() {
+        for sourceSize in [CGSize(width: 2160, height: 3840), CGSize(width: 1920, height: 1080), CGSize(width: 1280, height: 720)] {
+            for aspect in OutputAspect.allCases {
+                for source in [0.5625, 0.75, 1.0, 1.7778] as [CGFloat] {
+                    let ratio = aspect.ratio(source: source)
+                    let size = ExportSizing.renderSize(aspect: ratio, sourceSize: sourceSize)
+                    XCTAssertEqual(Int(size.width) % 2, 0)
+                    XCTAssertEqual(Int(size.height) % 2, 0)
+                    XCTAssertEqual(size.width / size.height, ratio, accuracy: ratio * 0.01, "\(aspect)")
+                    XCTAssertEqual(size.width * size.height, sourceSize.width * sourceSize.height,
+                                   accuracy: sourceSize.width * sourceSize.height * 0.02, "same quality as the source")
+                    XCTAssertLessThanOrEqual(size.width * size.height, 9_437_184, "H.264 level 5.2 frame size")
+                }
             }
         }
     }

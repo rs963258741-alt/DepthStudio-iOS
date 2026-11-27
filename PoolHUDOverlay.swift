@@ -1,7 +1,8 @@
 import SwiftUI
 
 /// Transparent, individually editable HUD for 泳池平潛 mode.
-/// Same rules as DiveHUDOverlay: sizes follow the stage's short side, each item takes
+/// Same rules as DiveHUDOverlay: every size follows the stage's short side (so the stage,
+/// the floating preview and the export have the same proportions), each item takes
 /// touches only inside its own frame and only while layout editing is on.
 struct PoolHUDOverlay: View {
     let reading: PoolReading?
@@ -12,8 +13,7 @@ struct PoolHUDOverlay: View {
 
     @State private var dragOrigins: [String: HUDPoint] = [:]
 
-    private let cyan = Color(red: 0.38, green: 0.91, blue: 1.0)
-    private let muted = Color(red: 0.75, green: 0.92, blue: 0.97)
+    private let cyan = HUDColor.cyan.swiftUI
 
     var body: some View {
         GeometryReader { proxy in
@@ -21,7 +21,7 @@ struct PoolHUDOverlay: View {
             let unit = HUDMetrics.unit(for: size)
             ZStack(alignment: .topLeading) {
                 if isEditing, let selected = settings.positions[selectedItem] {
-                    snapGuides(size: size, point: selected)
+                    HUDSnapGuides(size: size, point: selected, verticalOffset: settings.verticalOffset)
                 }
 
                 ForEach(PoolHUDItemDefinition.all) { definition in
@@ -62,91 +62,54 @@ struct PoolHUDOverlay: View {
 
     @ViewBuilder
     private func hudItem(_ id: String, size: CGSize, unit: CGFloat) -> some View {
+        let style = settings.style(for: id)
         switch id {
-        case "hudBrand":
-            Text("● FREEDIVE / POOL DYNAMIC")
-                .font(.system(size: max(8, unit * 0.027), weight: .bold, design: .rounded))
-                .tracking(1.3).foregroundStyle(muted).shadow(color: cyan.opacity(0.55), radius: 5)
-                .fixedSize()
-        case "hudClock":
-            Text(PoolFormat.clock(reading?.videoTime ?? 0))
-                .font(.system(size: max(9, unit * 0.030), weight: .semibold, design: .monospaced))
-                .foregroundStyle(.white).shadow(color: cyan.opacity(0.55), radius: 6).fixedSize()
         case "identityGroup":
-            HStack(spacing: max(5, unit * 0.012)) {
-                if let flagName = HUDCountryOption.assetName(for: settings.country) {
-                    Image(flagName)
-                        .resizable().scaledToFit()
-                        .frame(height: max(12, unit * 0.040 * settings.identityScale))
-                        .clipShape(RoundedRectangle(cornerRadius: 1))
-                }
-                Text(settings.displayName.isEmpty ? "name" : settings.displayName)
-                    .font(.system(size: max(11, unit * 0.036 * settings.identityScale), weight: .heavy, design: .rounded))
-                    .foregroundStyle(.white)
-                Text(settings.discipline)
-                    .font(.system(size: max(10, unit * 0.034 * settings.identityScale), weight: .black, design: .rounded))
-                    .tracking(0.8).foregroundStyle(cyan)
-                    .padding(.leading, 5)
-                    .overlay(alignment: .leading) { Rectangle().fill(cyan.opacity(0.55)).frame(width: 1).padding(.vertical, 2) }
-            }
-            .shadow(color: cyan.opacity(0.6), radius: 7)
-            .fixedSize()
-        case "distanceValue":
-            Text(reading.map { PoolFormat.distance($0.distance) } ?? "--.-")
-                .font(.system(size: max(28, unit * 0.13), weight: .black, design: .rounded).monospacedDigit())
-                .tracking(-1.5).foregroundStyle(.white)
-                .shadow(color: cyan.opacity(0.95), radius: 13).shadow(color: .black.opacity(0.65), radius: 3, y: 2)
-                .fixedSize()
-        case "distanceUnit":
-            Text("M").font(.system(size: max(10, unit * 0.038), weight: .heavy))
-                .foregroundStyle(cyan).shadow(color: cyan.opacity(0.6), radius: 6).fixedSize()
-        case "elapsedValue":
-            Text(reading.map { PoolFormat.clock($0.elapsedSeconds) } ?? "--:--")
-                .font(.system(size: max(13, unit * 0.055), weight: .heavy, design: .rounded).monospacedDigit())
-                .foregroundStyle(.white).shadow(color: cyan.opacity(0.5), radius: 6).fixedSize()
-        case "elapsedLabel":
-            metricLabel("DIVE TIME", unit: unit)
-        case "lapValue":
-            Text(reading.map(PoolFormat.lap) ?? "-- / --")
-                .font(.system(size: max(13, unit * 0.055), weight: .heavy, design: .rounded).monospacedDigit())
-                .foregroundStyle(.white).shadow(color: cyan.opacity(0.5), radius: 6).fixedSize()
-        case "lapLabel":
-            metricLabel("LAP", unit: unit)
-        case "speedValue":
-            Text("\(PoolFormat.speed(reading?.speed ?? 0)) m/s")
-                .font(.system(size: max(12, unit * 0.050), weight: .heavy, design: .rounded).monospacedDigit())
-                .foregroundStyle(.white).shadow(color: cyan.opacity(0.5), radius: 6).fixedSize()
-        case "speedLabel":
-            metricLabel("SPEED", unit: unit)
-        case "profileTitle":
-            Text("DISTANCE  /  SPEED PROFILE")
-                .font(.system(size: max(8, unit * 0.025), weight: .bold, design: .rounded))
-                .tracking(1).foregroundStyle(muted).shadow(color: cyan.opacity(0.5), radius: 4).fixedSize()
+            HUDIdentityView(name: settings.displayName, type: settings.discipline, countryID: settings.country,
+                            identityScale: settings.identityScale, style: style, unit: unit)
         case "profileBlock":
-            PoolProfileChart(timeline: timeline, reading: reading, unit: unit)
+            PoolProfileChart(timeline: timeline, reading: reading, unit: unit, style: style)
                 .frame(width: size.width * 0.91, height: size.height * 0.18)
-                .shadow(color: cyan.opacity(0.38), radius: 5)
-        case "footerBrand":
-            Text(PoolHUDSettings.footerText)
-                .font(.system(size: max(8, unit * 0.025), weight: .bold, design: .rounded))
-                .tracking(1).foregroundStyle(muted).shadow(color: cyan.opacity(0.45), radius: 4).fixedSize()
-        case "totalDistance":
-            Text("TOTAL \(PoolFormat.distance(timeline?.finalDistance ?? 0)) M")
-                .font(.system(size: max(8, unit * 0.025), weight: .bold, design: .rounded))
-                .tracking(1).foregroundStyle(muted).shadow(color: cyan.opacity(0.45), radius: 4).fixedSize()
-        case "averageSpeed":
-            Text("AVG \(PoolFormat.speed(timeline?.averageSpeed ?? 0)) M/S")
-                .font(.system(size: max(8, unit * 0.025), weight: .bold, design: .rounded))
-                .tracking(1).foregroundStyle(muted).shadow(color: cyan.opacity(0.45), radius: 4).fixedSize()
+                .shadow(color: style.accent(.cyan).swiftUI.opacity(style.glowOpacity(HUDChartColors.glow)),
+                        radius: HUDChartColors.glowRadius * HUDMetrics.point(unit: unit))
+                .hudDropShadow(style, point: HUDMetrics.point(unit: unit))
         default:
-            EmptyView()
+            if let spec = textSpec(for: id) {
+                HUDTextView(text: reading.flatMap { spec.live?($0) } ?? placeholder(for: id, spec: spec),
+                            look: spec.look, style: style, unit: unit)
+            }
         }
     }
 
-    private func metricLabel(_ text: String, unit: CGFloat) -> some View {
-        Text(text)
-            .font(.system(size: max(7, unit * 0.023), weight: .bold, design: .rounded))
-            .tracking(1.1).foregroundStyle(muted).shadow(color: cyan.opacity(0.45), radius: 4).fixedSize()
+    /// The export's text specs, so the preview and the video use the same texts and looks.
+    private func textSpec(for id: String) -> PoolHUDLayerBuilder.TextSpec? {
+        guard let timeline else { return Self.placeholderSpec(for: id) }
+        return PoolHUDLayerBuilder(timeline: timeline, settings: settings, videoDuration: timeline.finishTime).textSpec(for: id)
+    }
+
+    /// Texts without a timeline (no start/finish marked yet).
+    private static func placeholderSpec(for id: String) -> PoolHUDLayerBuilder.TextSpec? {
+        switch id {
+        case "hudBrand": return .init(text: "● FREEDIVE / POOL DYNAMIC", look: .brand)
+        case "distanceUnit": return .init(text: "M", look: .unitLetter)
+        case "elapsedLabel": return .init(text: "DIVE TIME", look: .label)
+        case "lapLabel": return .init(text: "LAP", look: .label)
+        case "speedLabel": return .init(text: "SPEED", look: .label)
+        case "profileTitle": return .init(text: "DISTANCE  /  SPEED PROFILE", look: .title)
+        case "footerBrand": return .init(text: PoolHUDSettings.footerText, look: .small)
+        case "totalDistance": return .init(text: "TOTAL 0.0 M", look: .small)
+        case "averageSpeed": return .init(text: "AVG 0.00 M/S", look: .small)
+        default: return nil
+        }
+    }
+
+    private func placeholder(for id: String, spec: PoolHUDLayerBuilder.TextSpec) -> String {
+        switch id {
+        case "distanceValue": return "--.-"
+        case "elapsedValue": return "--:--"
+        case "lapValue": return "-- / --"
+        default: return spec.text
+        }
     }
 
     /// One gesture for select and move: touching an item selects it, moving it drags it.
@@ -172,27 +135,13 @@ struct PoolHUDOverlay: View {
             dragOrigins[id] = settings.positions[id] ?? HUDPoint(x: 50, y: 50)
         }
         guard let origin = dragOrigins[id] else { return }
-        var x = origin.x + Double(translation.width / size.width * 100)
-        var y = origin.y + Double(translation.height / size.height * 100)
-        // Same centre-to-centre snapping threshold as the depth HUD (2% of stage).
-        for other in PoolHUDItemDefinition.all where other.id != id && (settings.visibility[other.id] ?? true) {
-            guard let otherPoint = settings.positions[other.id] else { continue }
-            if abs(x - otherPoint.x) < 2 { x = otherPoint.x }
-            if abs(y - otherPoint.y) < 2 { y = otherPoint.y }
-        }
-        settings.positions[id] = HUDPoint(x: min(99, max(1, x)), y: min(99, max(1, y)))
-    }
-
-    @ViewBuilder
-    private func snapGuides(size: CGSize, point: HUDPoint) -> some View {
-        Path { path in
-            let x = size.width * CGFloat(point.x / 100)
-            let y = size.height * CGFloat(min(100, max(0, point.y + settings.verticalOffset)) / 100)
-            path.move(to: CGPoint(x: x, y: 0)); path.addLine(to: CGPoint(x: x, y: size.height))
-            path.move(to: CGPoint(x: 0, y: y)); path.addLine(to: CGPoint(x: size.width, y: y))
-        }
-        .stroke(cyan.opacity(0.20), style: StrokeStyle(lineWidth: 0.7, dash: [3, 5]))
-        .allowsHitTesting(false)
+        // Snaps to the stage centre first (threshold 2% of stage), then to other fields' centres.
+        let others = PoolHUDItemDefinition.all
+            .filter { $0.id != id && (settings.visibility[$0.id] ?? true) }
+            .compactMap { settings.positions[$0.id] }
+        settings.positions[id] = HUDSnapping.snap(x: origin.x + Double(translation.width / size.width * 100),
+                                                  y: origin.y + Double(translation.height / size.height * 100),
+                                                  verticalOffset: settings.verticalOffset, others: others)
     }
 }
 
@@ -208,7 +157,7 @@ struct PoolProfileGeometry {
         CGRect(x: size.width * 0.12, y: size.height * 0.08, width: size.width * 0.76, height: size.height * 0.66)
     }
 
-    var labelFont: CGFloat { max(6, unit * 0.020) }
+    var labelFont: CGFloat { max(6 * point, unit * 0.020) }
     var point: CGFloat { HUDMetrics.point(unit: unit) }
 
     /// Distance axis top: the final distance rounded up to a whole pool length.
@@ -259,9 +208,7 @@ private struct PoolProfileChart: View {
     let timeline: PoolTimeline?
     let reading: PoolReading?
     let unit: CGFloat
-
-    private let cyan = Color(red: 0.44, green: 0.93, blue: 1.0)
-    private let yellow = Color(red: 1.0, green: 0.80, blue: 0.35)
+    let style: HUDItemStyle
 
     var body: some View {
         GeometryReader { geometry in
@@ -270,7 +217,9 @@ private struct PoolProfileChart: View {
                 let chart = PoolProfileGeometry(timeline: timeline, size: size, unit: unit)
                 let plot = chart.plot
                 let pt = chart.point
-                let gridColor = Color(red: 0.63, green: 0.88, blue: 0.94).opacity(0.28)
+                let cyan = style.accent(.chartCyan).swiftUI
+                let yellow = style.accent(.yellow).swiftUI
+                let gridColor = style.accent(.gridLine).swiftUI
                 let gridStyle = StrokeStyle(lineWidth: 0.7 * pt, dash: [2 * pt, 3 * pt])
 
                 for fraction in PoolProfileGeometry.gridFractions {
@@ -278,10 +227,12 @@ private struct PoolProfileChart: View {
                     var line = Path(); line.move(to: CGPoint(x: plot.minX, y: y)); line.addLine(to: CGPoint(x: plot.maxX, y: y))
                     context.stroke(line, with: .color(gridColor), style: gridStyle)
                     context.draw(Text("\(Int((chart.distanceLimit * fraction).rounded()))m")
-                                    .font(.system(size: chart.labelFont, weight: .semibold)).foregroundColor(cyan.opacity(0.9)),
+                                    .font(.system(size: chart.labelFont, weight: .semibold))
+                                    .foregroundColor(style.text(PoolChartColors.distanceLabel).swiftUI),
                                  at: CGPoint(x: plot.minX * 0.5, y: y))
                     context.draw(Text(String(format: "%.1f", chart.speedLimit * fraction))
-                                    .font(.system(size: chart.labelFont, weight: .semibold)).foregroundColor(yellow.opacity(0.9)),
+                                    .font(.system(size: chart.labelFont, weight: .semibold))
+                                    .foregroundColor(style.text(PoolChartColors.speedLabel).swiftUI),
                                  at: CGPoint(x: plot.maxX + (size.width - plot.maxX) * 0.5, y: y))
                 }
 
@@ -290,7 +241,8 @@ private struct PoolProfileChart: View {
                     var line = Path(); line.move(to: CGPoint(x: x, y: plot.minY)); line.addLine(to: CGPoint(x: x, y: plot.maxY))
                     context.stroke(line, with: .color(gridColor), style: gridStyle)
                     context.draw(Text(PoolFormat.clock(timeline.totalTime * Double(part) / 3))
-                                    .font(.system(size: chart.labelFont, weight: .semibold, design: .monospaced)).foregroundColor(.white.opacity(0.8)),
+                                    .font(.system(size: chart.labelFont, weight: .semibold, design: .monospaced))
+                                    .foregroundColor(style.text(HUDChartColors.timeLabel).swiftUI),
                                  at: CGPoint(x: x, y: size.height * 0.88))
                 }
 
@@ -309,7 +261,8 @@ private struct PoolProfileChart: View {
                 if let reading {
                     let x = chart.x(forTime: reading.videoTime)
                     var guide = Path(); guide.move(to: CGPoint(x: x, y: plot.minY)); guide.addLine(to: CGPoint(x: x, y: plot.maxY))
-                    context.stroke(guide, with: .color(.white.opacity(0.55)), style: StrokeStyle(lineWidth: 1 * pt, dash: [3 * pt, 3 * pt]))
+                    context.stroke(guide, with: .color(style.accent(.white).swiftUI.opacity(0.55)),
+                                   style: StrokeStyle(lineWidth: 1 * pt, dash: [3 * pt, 3 * pt]))
                     let r = 4 * pt
                     let distanceDot = CGRect(x: x - r, y: chart.y(forDistance: reading.distance) - r, width: 2 * r, height: 2 * r)
                     context.fill(Path(ellipseIn: distanceDot), with: .color(cyan))

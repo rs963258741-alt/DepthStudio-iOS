@@ -48,23 +48,46 @@ run_tests() {  # name, extra xcodebuild args...
   return "$status"
 }
 
+# Which tests to run. TEST_FILTER (optional, space or comma separated) narrows the run,
+# e.g. "DepthStudioTests/ExportPipelineTests DepthStudioUITests/Round3UITests".
+UNIT_ONLY=(-only-testing:DepthStudioTests)
+UI_ONLY=(-only-testing:DepthStudioUITests)
+if [[ -n "${TEST_FILTER:-}" ]]; then
+  echo "TEST_FILTER: $TEST_FILTER" | tee -a "$LOG"
+  UNIT_ONLY=()
+  UI_ONLY=()
+  for test_id in ${TEST_FILTER//,/ }; do
+    case "$test_id" in
+      DepthStudioUITests*) UI_ONLY+=(-only-testing:"$test_id") ;;
+      DepthStudioTests*) UNIT_ONLY+=(-only-testing:"$test_id") ;;
+      *) echo "Ignoring unknown test id: $test_id" | tee -a "$LOG" ;;
+    esac
+  done
+fi
+
 # Build once, then run the unit/integration tests and the UI tests separately.
 xcodebuild build-for-testing "${COMMON[@]}" 2>&1 | tee -a "$LOG" | grep --line-buffered -E ": error: |^\*\* [A-Z ]+ \*\*"
 BUILD_STATUS=${PIPESTATUS[0]}
 UNIT_STATUS=1
 UI_STATUS=1
 if [[ "$BUILD_STATUS" -eq 0 ]]; then
-  run_tests unit-tests test-without-building -only-testing:DepthStudioTests
-  UNIT_STATUS=$?
-  run_tests ui-tests test-without-building -only-testing:DepthStudioUITests
-  UI_STATUS=$?
-  if [[ "$UI_STATUS" -ne 0 ]] && grep -q "failed to initialize for UI testing" "$LOG"; then
-    echo "UI test runner failed to start; restarting the simulator and retrying once." | tee -a "$LOG"
-    xcrun simctl shutdown "$DEVICE_ID" >/dev/null 2>&1 || true
-    xcrun simctl boot "$DEVICE_ID" >/dev/null 2>&1 || true
-    xcrun simctl bootstatus "$DEVICE_ID" -b || true
-    run_tests ui-tests-retry test-without-building -only-testing:DepthStudioUITests
+  UNIT_STATUS=0
+  if [[ ${#UNIT_ONLY[@]} -gt 0 ]]; then
+    run_tests unit-tests test-without-building "${UNIT_ONLY[@]}"
+    UNIT_STATUS=$?
+  fi
+  UI_STATUS=0
+  if [[ ${#UI_ONLY[@]} -gt 0 ]]; then
+    run_tests ui-tests test-without-building "${UI_ONLY[@]}"
     UI_STATUS=$?
+    if [[ "$UI_STATUS" -ne 0 ]] && grep -q "failed to initialize for UI testing" "$LOG"; then
+      echo "UI test runner failed to start; restarting the simulator and retrying once." | tee -a "$LOG"
+      xcrun simctl shutdown "$DEVICE_ID" >/dev/null 2>&1 || true
+      xcrun simctl boot "$DEVICE_ID" >/dev/null 2>&1 || true
+      xcrun simctl bootstatus "$DEVICE_ID" -b || true
+      run_tests ui-tests-retry test-without-building "${UI_ONLY[@]}"
+      UI_STATUS=$?
+    fi
   fi
 fi
 
@@ -75,7 +98,7 @@ find "$HOME/Library/Logs/DiagnosticReports" -type f -newer "$MARKER" 2>/dev/null
 find "$ARTIFACTS" -path "*-diagnostics*" -type f ! -name "*.ips" ! -name "*.crash" ! -iname "*crash*" -delete 2>/dev/null || true
 
 {
-  echo "build-for-testing: $BUILD_STATUS   unit tests: $UNIT_STATUS   UI tests: $UI_STATUS"
+  echo "build-for-testing: $BUILD_STATUS   unit tests: $UNIT_STATUS   UI tests: $UI_STATUS   filter: ${TEST_FILTER:-all}"
   echo "passed: $(grep -cE "Test Case .* passed" "$LOG" || true)"
   echo "failed: $(grep -cE "Test Case .* failed" "$LOG" || true)"
   echo "---- failures ----"

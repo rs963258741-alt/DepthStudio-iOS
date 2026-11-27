@@ -44,7 +44,10 @@ enum TestArtifacts {
 enum TestVideoFactory {
     enum Failure: Error { case writer(String) }
 
-    static func makeVideo(url: URL, size: CGSize, duration: Double, fps: Int32 = 30) async throws {
+    /// `size` is the encoded (natural) size; `transform` is the track's preferred transform
+    /// (a rotated phone video has a landscape natural size and a 90° transform).
+    static func makeVideo(url: URL, size: CGSize, duration: Double, fps: Int32 = 30,
+                          transform: CGAffineTransform = .identity) async throws {
         try? FileManager.default.removeItem(at: url)
         let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
         let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
@@ -53,6 +56,7 @@ enum TestVideoFactory {
             AVVideoHeightKey: Int(size.height)
         ])
         input.expectsMediaDataInRealTime = false
+        input.transform = transform
         let adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input, sourcePixelBufferAttributes: [
             kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32BGRA),
             kCVPixelBufferWidthKey as String: Int(size.width),
@@ -107,6 +111,9 @@ enum TestVideoFactory {
         let swimmerY = size.height * (0.45 + 0.15 * CGFloat(sin(time * 1.7)))
         context.setFillColor(UIColor(red: 0.95, green: 0.80, blue: 0.65, alpha: 1).cgColor)
         context.fill(CGRect(x: size.width * 0.40, y: swimmerY, width: size.width * 0.20, height: size.height * 0.12))
+        // An orange corner mark (first rows of the buffer, left), so a wrong rotation or flip shows.
+        context.setFillColor(UIColor(red: 1.0, green: 0.55, blue: 0.05, alpha: 1).cgColor)
+        context.fill(CGRect(x: size.width * 0.05, y: size.height * 0.80, width: size.width * 0.18, height: size.height * 0.12))
     }
 
     static func frame(of url: URL, at seconds: Double, maximumSize: CGSize = CGSize(width: 1080, height: 1080)) async throws -> UIImage {
@@ -154,5 +161,67 @@ enum PreviewRenderer {
         let renderer = ImageRenderer(content: content.frame(width: size.width, height: size.height))
         renderer.scale = scale
         return renderer.uiImage
+    }
+}
+
+/// Pixel comparisons of rendered and exported frames.
+enum PixelCompare {
+    /// RGBA bytes of `image` drawn at `size` (sRGB, premultiplied).
+    static func pixels(_ image: CGImage, size: CGSize) -> [UInt8] {
+        let width = Int(size.width), height = Int(size.height)
+        var data = [UInt8](repeating: 0, count: width * height * 4)
+        data.withUnsafeMutableBytes { buffer in
+            guard let context = CGContext(data: buffer.baseAddress, width: width, height: height, bitsPerComponent: 8,
+                                          bytesPerRow: width * 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return }
+            context.interpolationQuality = .medium
+            context.draw(image, in: CGRect(origin: .zero, size: size))
+        }
+        return data
+    }
+
+    /// Mean absolute RGB difference (0...255) of two images at `size`, optionally only in
+    /// `region` (normalised, origin top left).
+    static func meanDifference(_ a: CGImage, _ b: CGImage, size: CGSize, region: CGRect? = nil) -> Double {
+        let pa = pixels(a, size: size), pb = pixels(b, size: size)
+        let width = Int(size.width), height = Int(size.height)
+        let area = region ?? CGRect(x: 0, y: 0, width: 1, height: 1)
+        let x0 = max(0, Int(area.minX * CGFloat(width))), x1 = min(width, Int(area.maxX * CGFloat(width)))
+        // CGContext rows start at the bottom; the region's y is from the top.
+        let y0 = max(0, Int(area.minY * CGFloat(height))), y1 = min(height, Int(area.maxY * CGFloat(height)))
+        var total = 0.0, count = 0
+        for row in y0..<max(y0, y1) {
+            let bufferRow = height - 1 - row
+            for column in x0..<max(x0, x1) {
+                let index = (bufferRow * width + column) * 4
+                total += Double(abs(Int(pa[index]) - Int(pb[index])))
+                total += Double(abs(Int(pa[index + 1]) - Int(pb[index + 1])))
+                total += Double(abs(Int(pa[index + 2]) - Int(pb[index + 2])))
+                count += 3
+            }
+        }
+        return count > 0 ? total / Double(count) : 0
+    }
+
+    /// Mean alpha (0...255) in `region` (normalised, origin top left).
+    static func meanAlpha(_ image: CGImage, size: CGSize, region: CGRect) -> Double {
+        let p = pixels(image, size: size)
+        let width = Int(size.width), height = Int(size.height)
+        let x0 = max(0, Int(region.minX * CGFloat(width))), x1 = min(width, Int(region.maxX * CGFloat(width)))
+        let y0 = max(0, Int(region.minY * CGFloat(height))), y1 = min(height, Int(region.maxY * CGFloat(height)))
+        var total = 0.0, count = 0
+        for row in y0..<max(y0, y1) {
+            for column in x0..<max(x0, x1) {
+                total += Double(p[((height - 1 - row) * width + column) * 4 + 3])
+                count += 1
+            }
+        }
+        return count > 0 ? total / Double(count) : 0
+    }
+
+    /// A box around a HUD position given in % of the frame.
+    static func region(around point: HUDPoint, halfWidth: CGFloat = 0.05, halfHeight: CGFloat = 0.03) -> CGRect {
+        CGRect(x: CGFloat(point.x / 100) - halfWidth, y: CGFloat(point.y / 100) - halfHeight,
+               width: halfWidth * 2, height: halfHeight * 2)
     }
 }

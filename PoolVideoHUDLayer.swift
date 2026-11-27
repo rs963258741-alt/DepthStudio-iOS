@@ -29,20 +29,16 @@ extension DiveVideoExporter {
     }
 }
 
-/// Builds the Core Animation HUD for an exported pool video with the same settings and
-/// sizing rules (HUDMetrics, PoolProfileGeometry) as the on-screen PoolHUDOverlay.
+/// Builds the HUD layer tree for an exported pool video with the same settings, looks and
+/// sizing rules (HUDMetrics, HUDTextLook, PoolProfileGeometry) as the on-screen PoolHUDOverlay.
 struct PoolHUDLayerBuilder {
     let timeline: PoolTimeline
     let settings: PoolHUDSettings
     let videoDuration: Double
 
-    private struct TextSpec {
+    struct TextSpec {
         var text: String
-        var font: UIFont
-        var color: UIColor
-        var tracking: CGFloat = 0
-        var glowOpacity: Float
-        var glowRadius: CGFloat
+        var look: HUDTextLook
         var live: ((PoolReading) -> String)? = nil
     }
 
@@ -53,38 +49,31 @@ struct PoolHUDLayerBuilder {
         hud.masksToBounds = false
         let unit = HUDMetrics.unit(for: size)
         let swimTimes = self.swimTimes()
-        let clockTimes = Array(stride(from: 0.0, to: max(0.001, videoDuration), by: 0.5))
+        let clockTimes = DiveVideoExporter.sampleTimes(from: 0, to: max(0.001, videoDuration), step: 0.5)
 
         for item in PoolHUDItemDefinition.all {
             guard settings.visibility[item.id] ?? true else { continue }
+            let style = settings.style(for: item.id)
             let layer: CALayer
             switch item.id {
             case "identityGroup":
                 layer = HUDLayerFactory.identity(name: settings.displayName, type: settings.discipline,
                                                  countryID: settings.country,
-                                                 identityScale: settings.identityScale, unit: unit)
-                HUDLayerFactory.rasterize(layer)
+                                                 identityScale: settings.identityScale, style: style, unit: unit)
             case "profileBlock":
-                layer = profileLayer(chartSize: CGSize(width: size.width * 0.91, height: size.height * 0.18), unit: unit)
+                layer = profileLayer(chartSize: CGSize(width: size.width * 0.91, height: size.height * 0.18),
+                                     unit: unit, style: style)
             default:
-                guard let spec = textSpec(for: item.id, unit: unit) else { continue }
-                let box = CGRect(x: 0, y: 0, width: max(unit * 0.9, 10), height: HUDLayerFactory.lineHeight(of: spec.font) * 1.2)
-                let container = CALayer()
-                container.contentsScale = 1
-                container.bounds = box
-                let text = HUDLayerFactory.text(spec.text, in: box, font: spec.font, color: spec.color,
-                                                tracking: spec.tracking, glowOpacity: spec.glowOpacity,
-                                                glowRadius: spec.glowRadius)
-                container.addSublayer(text)
+                guard let spec = textSpec(for: item.id) else { continue }
+                let made = HUDLayerFactory.textItem(spec.text, look: spec.look, style: style, unit: unit,
+                                                    width: spec.live == nil ? nil : max(unit * 0.9, 10))
                 if let live = spec.live {
-                    HUDLayerFactory.addSampledText(to: text, times: item.id == "hudClock" ? clockTimes : swimTimes,
+                    HUDLayerFactory.addSampledText(to: made.text, times: item.id == "hudClock" ? clockTimes : swimTimes,
                                                    duration: videoDuration, key: "pool-text-\(item.id)") { time in
                         live(timeline.reading(atVideoTime: time))
                     }
-                } else {
-                    HUDLayerFactory.rasterize(container)
                 }
-                layer = container
+                layer = made.item
             }
             let point = settings.positions[item.id] ?? HUDPoint(x: 50, y: 50)
             let transform = settings.transforms[item.id] ?? HUDTransform()
@@ -98,48 +87,23 @@ struct PoolHUDLayerBuilder {
         return hud
     }
 
-    /// Text items with the same font sizes, weights, colours and glow as PoolHUDOverlay.
-    private func textSpec(for id: String, unit: CGFloat) -> TextSpec? {
-        let pt = HUDMetrics.point(unit: unit)
-        let font = HUDLayerFactory.font
-        let white = HUDLayerFactory.white, cyan = HUDLayerFactory.cyan, muted = HUDLayerFactory.muted
-        func label(_ text: String) -> TextSpec {
-            TextSpec(text: text, font: font(unit * 0.023, .bold, .rounded), color: muted,
-                     tracking: 1.1 * pt, glowOpacity: 0.45, glowRadius: 4 * pt)
-        }
-        func small(_ text: String) -> TextSpec {
-            TextSpec(text: text, font: font(unit * 0.025, .bold, .rounded), color: muted,
-                     tracking: 1 * pt, glowOpacity: 0.45, glowRadius: 4 * pt)
-        }
+    /// Text of a pool HUD field, with the look the preview uses.
+    func textSpec(for id: String) -> TextSpec? {
         switch id {
-        case "hudBrand":
-            return TextSpec(text: "● FREEDIVE / POOL DYNAMIC", font: font(unit * 0.027, .bold, .rounded), color: muted,
-                            tracking: 1.3 * pt, glowOpacity: 0.55, glowRadius: 5 * pt)
-        case "hudClock":
-            return TextSpec(text: "00:00", font: font(unit * 0.030, .semibold, .monospaced), color: white,
-                            glowOpacity: 0.55, glowRadius: 6 * pt, live: { PoolFormat.clock($0.videoTime) })
-        case "distanceValue":
-            return TextSpec(text: "0.0", font: font(unit * 0.13, .black, .rounded), color: white,
-                            glowOpacity: 0.95, glowRadius: 13 * pt, live: { PoolFormat.distance($0.distance) })
-        case "distanceUnit":
-            return TextSpec(text: "M", font: font(unit * 0.038, .heavy, .standard), color: cyan,
-                            glowOpacity: 0.6, glowRadius: 6 * pt)
-        case "elapsedValue":
-            return TextSpec(text: "00:00", font: font(unit * 0.055, .heavy, .rounded), color: white,
-                            glowOpacity: 0.5, glowRadius: 6 * pt, live: { PoolFormat.clock($0.elapsedSeconds) })
-        case "elapsedLabel": return label("DIVE TIME")
-        case "lapValue":
-            return TextSpec(text: "01 / 01", font: font(unit * 0.055, .heavy, .rounded), color: white,
-                            glowOpacity: 0.5, glowRadius: 6 * pt, live: { PoolFormat.lap($0) })
-        case "lapLabel": return label("LAP")
-        case "speedValue":
-            return TextSpec(text: "0.00 m/s", font: font(unit * 0.050, .heavy, .rounded), color: white,
-                            glowOpacity: 0.5, glowRadius: 6 * pt, live: { "\(PoolFormat.speed($0.speed)) m/s" })
-        case "speedLabel": return label("SPEED")
-        case "profileTitle": return small("DISTANCE  /  SPEED PROFILE")
-        case "footerBrand": return small(PoolHUDSettings.footerText)
-        case "totalDistance": return small("TOTAL \(PoolFormat.distance(timeline.finalDistance)) M")
-        case "averageSpeed": return small("AVG \(PoolFormat.speed(timeline.averageSpeed)) M/S")
+        case "hudBrand": return TextSpec(text: "● FREEDIVE / POOL DYNAMIC", look: .brand)
+        case "hudClock": return TextSpec(text: "00:00", look: .clock, live: { PoolFormat.clock($0.videoTime) })
+        case "distanceValue": return TextSpec(text: "0.0", look: .distanceValue, live: { PoolFormat.distance($0.distance) })
+        case "distanceUnit": return TextSpec(text: "M", look: .unitLetter)
+        case "elapsedValue": return TextSpec(text: "00:00", look: .value, live: { PoolFormat.clock($0.elapsedSeconds) })
+        case "elapsedLabel": return TextSpec(text: "DIVE TIME", look: .label)
+        case "lapValue": return TextSpec(text: "01 / 01", look: .value, live: { PoolFormat.lap($0) })
+        case "lapLabel": return TextSpec(text: "LAP", look: .label)
+        case "speedValue": return TextSpec(text: "0.00 m/s", look: .speed, live: { "\(PoolFormat.speed($0.speed)) m/s" })
+        case "speedLabel": return TextSpec(text: "SPEED", look: .label)
+        case "profileTitle": return TextSpec(text: "DISTANCE  /  SPEED PROFILE", look: .title)
+        case "footerBrand": return TextSpec(text: PoolHUDSettings.footerText, look: .small)
+        case "totalDistance": return TextSpec(text: "TOTAL \(PoolFormat.distance(timeline.finalDistance)) M", look: .small)
+        case "averageSpeed": return TextSpec(text: "AVG \(PoolFormat.speed(timeline.averageSpeed)) M/S", look: .small)
         default: return nil
         }
     }
@@ -158,78 +122,98 @@ struct PoolHUDLayerBuilder {
     }
 
     /// Two-curve chart drawn with PoolProfileGeometry, like the preview.
-    private func profileLayer(chartSize: CGSize, unit: CGFloat) -> CALayer {
+    private func profileLayer(chartSize: CGSize, unit: CGFloat, style: HUDItemStyle) -> CALayer {
         let chart = PoolProfileGeometry(timeline: timeline, size: chartSize, unit: unit)
         let plot = chart.plot
         let pt = chart.point
-        let layer = CALayer()
-        layer.contentsScale = 1
-        layer.bounds = CGRect(origin: .zero, size: chartSize)
+        let bounds = CGRect(origin: .zero, size: chartSize)
+        let cyan = style.accent(.chartCyan).uiColor
+        let yellow = style.accent(.yellow).uiColor
+        let gridColor = style.accent(.gridLine).uiColor
 
         let background = CALayer()
         background.contentsScale = 1
-        background.frame = layer.bounds
+        background.frame = bounds
         let gridDash = [2 * pt, 3 * pt]
         let labelFont = HUDLayerFactory.font(size: chart.labelFont, weight: .semibold, design: .standard)
         let timeFont = HUDLayerFactory.font(size: chart.labelFont, weight: .semibold, design: .monospaced)
         for fraction in PoolProfileGeometry.gridFractions {
             let y = plot.maxY - CGFloat(fraction) * plot.height
             background.addSublayer(HUDLayerFactory.line([CGPoint(x: plot.minX, y: y), CGPoint(x: plot.maxX, y: y)],
-                                                        color: HUDLayerFactory.grid, width: 0.7 * pt, dash: gridDash, cap: .butt))
+                                                        color: gridColor, width: 0.7 * pt, dash: gridDash, cap: .butt))
             let leftWidth = plot.minX * 1.6
             background.addSublayer(HUDLayerFactory.text("\(Int((chart.distanceLimit * fraction).rounded()))m",
                                                         in: CGRect(x: plot.minX * 0.5 - leftWidth / 2, y: y - 1, width: leftWidth, height: 2),
-                                                        font: labelFont, color: HUDLayerFactory.chartCyan.withAlphaComponent(0.9)))
+                                                        font: labelFont, color: style.text(PoolChartColors.distanceLabel).uiColor))
             let rightCenter = plot.maxX + (chartSize.width - plot.maxX) * 0.5
             let rightWidth = (chartSize.width - plot.maxX) * 1.6
             background.addSublayer(HUDLayerFactory.text(String(format: "%.1f", chart.speedLimit * fraction),
                                                         in: CGRect(x: rightCenter - rightWidth / 2, y: y - 1, width: rightWidth, height: 2),
-                                                        font: labelFont, color: HUDLayerFactory.yellow.withAlphaComponent(0.9)))
+                                                        font: labelFont, color: style.text(PoolChartColors.speedLabel).uiColor))
         }
         for part in 1...3 {
             let x = plot.minX + CGFloat(part) / 3 * plot.width
             background.addSublayer(HUDLayerFactory.line([CGPoint(x: x, y: plot.minY), CGPoint(x: x, y: plot.maxY)],
-                                                        color: HUDLayerFactory.grid, width: 0.7 * pt, dash: gridDash, cap: .butt))
+                                                        color: gridColor, width: 0.7 * pt, dash: gridDash, cap: .butt))
             let width = chartSize.width * 0.2
             background.addSublayer(HUDLayerFactory.text(PoolFormat.clock(timeline.totalTime * Double(part) / 3),
                                                         in: CGRect(x: x - width / 2, y: chartSize.height * 0.88 - 1, width: width, height: 2),
-                                                        font: timeFont, color: UIColor.white.withAlphaComponent(0.8)))
+                                                        font: timeFont, color: style.text(HUDChartColors.timeLabel).uiColor))
         }
-        background.addSublayer(HUDLayerFactory.line(chart.speedPoints, color: HUDLayerFactory.yellow, width: 1.6 * pt))
-        let distance = HUDLayerFactory.line(chart.distancePoints, color: HUDLayerFactory.chartCyan, width: 2 * pt)
-        distance.shadowColor = HUDLayerFactory.cyan.cgColor
-        distance.shadowOpacity = 0.38
-        distance.shadowRadius = 5 * pt
-        distance.shadowOffset = .zero
-        background.addSublayer(distance)
-        HUDLayerFactory.rasterize(background)
-        layer.addSublayer(background)
+        background.addSublayer(HUDLayerFactory.line(chart.speedPoints, color: yellow, width: 1.6 * pt))
+        background.addSublayer(HUDLayerFactory.line(chart.distancePoints, color: cyan, width: 2 * pt))
 
-        // Playhead and the two markers follow the video time (0.1 s keyframes, the profile's resolution).
+        // The whole chart casts the cyan glow, like the preview's .shadow on the chart.
+        let glowColor = style.accent(.cyan).uiColor
+        let glowOpacity = style.glowOpacity(HUDChartColors.glow)
+        let glowRadius = HUDChartColors.glowRadius * pt
+        let content = CALayer()
+        content.contentsScale = 1
+        content.frame = bounds
+        content.addSublayer(HUDLayerFactory.shadowGroup(background, bounds: bounds, color: glowColor,
+                                                        opacity: glowOpacity, radius: glowRadius))
+
+        // Playhead and the two markers follow the video time (0.1 s steps, the profile's resolution).
         let times = swimTimes() + [timeline.finishTime]
         let guide = HUDLayerFactory.line([CGPoint(x: 0, y: 0), CGPoint(x: 0, y: plot.height)],
-                                         color: UIColor.white.withAlphaComponent(0.55),
+                                         color: style.accent(.white).uiColor.withAlphaComponent(0.55),
                                          width: 1 * pt, dash: [3 * pt, 3 * pt], cap: .butt)
         guide.bounds = CGRect(x: 0, y: 0, width: max(1, pt), height: plot.height)
-        layer.addSublayer(guide)
+        HUDLayerFactory.setShadow(on: guide, color: glowColor, opacity: Float(glowOpacity), radius: glowRadius)
+        content.addSublayer(guide)
         HUDLayerFactory.addPositionAnimation(to: guide, times: [timeline.startTime, timeline.finishTime],
                                              duration: videoDuration, key: "pool-guide") { time in
             CGPoint(x: chart.x(forTime: time), y: plot.midY)
         }
 
-        let distanceDot = HUDLayerFactory.dot(diameter: 8 * pt, fill: HUDLayerFactory.chartCyan, stroke: .white, strokeWidth: 1.2 * pt)
-        layer.addSublayer(distanceDot)
+        let distanceDot = HUDLayerFactory.dot(diameter: 8 * pt, fill: cyan, stroke: .white, strokeWidth: 1.2 * pt)
+        HUDLayerFactory.setShadow(on: distanceDot, color: glowColor, opacity: Float(glowOpacity), radius: glowRadius)
+        content.addSublayer(distanceDot)
         HUDLayerFactory.addPositionAnimation(to: distanceDot, times: times, duration: videoDuration, key: "pool-distance-dot") { time in
             CGPoint(x: chart.x(forTime: time), y: chart.y(forDistance: timeline.reading(atVideoTime: time).distance))
         }
 
         // Speed changes in steps, so each change gets a keyframe just before it as well.
         let stepTimes = times.flatMap { [$0 - 0.001, $0] }
-        let speedDot = HUDLayerFactory.dot(diameter: 8 * pt, fill: HUDLayerFactory.yellow, stroke: .white, strokeWidth: 1.2 * pt)
-        layer.addSublayer(speedDot)
+        let speedDot = HUDLayerFactory.dot(diameter: 8 * pt, fill: yellow, stroke: .white, strokeWidth: 1.2 * pt)
+        HUDLayerFactory.setShadow(on: speedDot, color: glowColor, opacity: Float(glowOpacity), radius: glowRadius)
+        content.addSublayer(speedDot)
         HUDLayerFactory.addPositionAnimation(to: speedDot, times: stepTimes, duration: videoDuration, key: "pool-speed-dot") { time in
             CGPoint(x: chart.x(forTime: time), y: chart.y(forSpeed: timeline.reading(atVideoTime: time).speed))
         }
+
+        let layer = CALayer()
+        layer.contentsScale = 1
+        layer.bounds = bounds
+        let styled = HUDLayerFactory.applyDropShadow(style, to: content, bounds: bounds, point: pt)
+        styled.frame = bounds
+        layer.addSublayer(styled)
         return layer
     }
+}
+
+/// Label colours of the pool chart (「字體顏色」 of the chart changes these).
+enum PoolChartColors {
+    static let distanceLabel = HUDColor.chartCyan.opacity(0.9)
+    static let speedLabel = HUDColor.yellow.opacity(0.9)
 }

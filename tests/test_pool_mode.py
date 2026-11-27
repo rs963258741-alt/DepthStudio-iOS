@@ -30,7 +30,8 @@ class PoolHUDConsistencyTests(unittest.TestCase):
         self.assertEqual(dict_keys("positions"), set(ids))
         self.assertEqual(dict_keys("visibility"), set(ids))
         for item_id in ids:
-            self.assertIn(f'case "{item_id}"', OVERLAY, f"preview does not draw {item_id}")
+            # The preview draws text fields from the export builder's shared text specs.
+            self.assertIn(f'case "{item_id}"', OVERLAY + EXPORT, f"preview does not draw {item_id}")
             self.assertTrue(f'case "{item_id}"' in EXPORT or f'"{item_id}"' in EXPORT,
                             f"export does not draw {item_id}")
 

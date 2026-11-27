@@ -36,8 +36,8 @@ struct DiveStageView: View {
     }
 }
 
-/// Floating 「預覽影像」 content for depth mode: a still of the current frame (or the empty
-/// stage) with the HUD, not editable.
+/// Floating 「預覽影像」 content for depth mode: the live video (the same player as the stage)
+/// or the empty stage, with the HUD at the stage's proportions; not editable.
 struct DiveFloatingPreview: View {
     let playback: PlaybackController
     let samples: [DiveSample]
@@ -49,8 +49,8 @@ struct DiveFloatingPreview: View {
 
     var body: some View {
         ZStack {
-            if let url = playback.url {
-                VideoStillView(url: url, time: playback.currentTime)
+            if playback.hasVideo {
+                PlayerLayerView(player: playback.player)
             } else {
                 LinearGradient(colors: [Color(red: 0.04, green: 0.20, blue: 0.28), Color(red: 0.015, green: 0.055, blue: 0.085)],
                                startPoint: .top, endPoint: .bottom)

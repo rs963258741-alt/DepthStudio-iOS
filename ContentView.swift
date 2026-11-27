@@ -55,8 +55,9 @@ struct ContentView: View {
     @State private var playback = PlaybackController()
     @State private var outputAspect: OutputAspect = .original
     @State private var showingFloatingPreview = false
-    @State private var confirmingSaveDefaultLayout = false
-    @State private var hasCustomDefaultLayout = HUDSettings.customDefaultLayout() != nil
+    /// Preset slot (1 or 2) waiting for 「設為預設」 confirmation.
+    @State private var confirmingPresetSlot: Int?
+    @State private var savedPresetSlots = HUDSettings.savedPresetSlots()
 
     @State private var statusMessage = "已載入示範潛水資料。請匯入 iPhone 照片中的影片及你的 FIT／UDDF 紀錄。"
     @State private var errorMessage: String?
@@ -66,7 +67,7 @@ struct ContentView: View {
     @State private var exportProgress = 0.0
     @State private var exportedVideoURL: URL?
     @State private var exportClock = ExportProgressClock()
-    @State private var exportInfo = "輸出 4K 等級 MP4（9:16 為 2160 × 3840）；完成後可直接儲存到 iPhone 照片。"
+    @State private var exportInfo = "依來源影片畫質輸出 MP4（4K 來源輸出 4K、1080P 來源輸出 1080P）；完成後可直接儲存到 iPhone 照片。"
 
     private var diveLogContentTypes: [UTType] {
         var types: [UTType] = [.data, .xml]
@@ -139,11 +140,14 @@ struct ContentView: View {
         .background(DepthStudioColors.background.ignoresSafeArea())
         .preferredColorScheme(.dark)
         .onDisappear { playback.unload() }
-        .confirmationDialog("將目前排版設為預設？", isPresented: $confirmingSaveDefaultLayout, titleVisibility: .visible) {
-            Button("設為預設") { saveCurrentLayoutAsDefault() }
+        .confirmationDialog("將目前排版設為預設\(confirmingPresetSlot ?? 1)？", isPresented: presetConfirmationShown,
+                            titleVisibility: .visible, presenting: confirmingPresetSlot) { slot in
+            Button("設為預設\(slot)") { savePreset(slot) }
             Button("取消", role: .cancel) {}
-        } message: {
-            Text("之後按「恢復預設位置」會回到目前的排版，重新啟動 App 也一樣。")
+        } message: { slot in
+            Text(slot == 1
+                 ? "儲存目前的位置、大小、旋轉、顯示欄位與字體顏色／陰影／對比。之後按「預設1」或「恢復預設位置」就會回到這個排版，重新啟動 App 也一樣。"
+                 : "儲存目前的位置、大小、旋轉、顯示欄位與字體顏色／陰影／對比。之後按「預設2」就會套用這個排版，重新啟動 App 也一樣。")
         }
         .confirmationDialog("切換潛水模式？", isPresented: $confirmingModeSwitch, titleVisibility: .visible) {
             Button("回到模式選擇") { onSwitchMode?() }
@@ -168,6 +172,20 @@ struct ContentView: View {
         .onChange(of: hudSettings.displayName) { _, newValue in
             if newValue.count > 30 { hudSettings.displayName = String(newValue.prefix(30)) }
         }
+        .task { await loadSampleVideoForUITests() }
+    }
+
+    private var presetConfirmationShown: Binding<Bool> {
+        Binding(get: { confirmingPresetSlot != nil }, set: { if !$0 { confirmingPresetSlot = nil } })
+    }
+
+    /// UI tests start with a generated video (launch argument -uitest-sample-video).
+    private func loadSampleVideoForUITests() async {
+        #if DEBUG
+        guard UITestSupport.loadsSampleVideo, videoURL == nil,
+              let url = try? await UITestSupport.sampleVideoURL() else { return }
+        applyImportedVideo(url, displayName: url.lastPathComponent)
+        #endif
     }
 
     private var header: some View {
@@ -298,32 +316,24 @@ struct ContentView: View {
     }
 
     private var layoutButtons: some View {
-        HStack(spacing: 8) {
-            Button {
-                isEditingLayout.toggle()
-            } label: {
-                Label(isEditingLayout ? "排版：開" : "排版：關", systemImage: isEditingLayout ? "hand.draw.fill" : "hand.draw")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(isEditingLayout ? .black : DepthStudioColors.cyan)
-                    .padding(.horizontal, 10).padding(.vertical, 7)
-                    .background(isEditingLayout ? DepthStudioColors.cyan : DepthStudioColors.background, in: Capsule())
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Button {
+                    isEditingLayout.toggle()
+                } label: {
+                    Label(isEditingLayout ? "排版：開" : "排版：關", systemImage: isEditingLayout ? "hand.draw.fill" : "hand.draw")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(isEditingLayout ? .black : DepthStudioColors.cyan)
+                        .padding(.horizontal, 10).padding(.vertical, 7)
+                        .background(isEditingLayout ? DepthStudioColors.cyan : DepthStudioColors.background, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("layout.toggle")
+                Spacer(minLength: 0)
             }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("layout.toggle")
-
-            Button {
-                confirmingSaveDefaultLayout = true
-            } label: {
-                Label("將目前排版設為預設", systemImage: "pin")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(DepthStudioColors.cyan)
-                    .padding(.horizontal, 10).padding(.vertical, 7)
-                    .background(DepthStudioColors.background, in: Capsule())
-                    .overlay(Capsule().stroke(DepthStudioColors.cyan.opacity(0.4), lineWidth: 1))
-            }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("layout.saveDefault")
-            Spacer(minLength: 0)
+            HUDPresetButtons(savedSlots: savedPresetSlots,
+                             onSave: { confirmingPresetSlot = $0 },
+                             onApply: applyPreset)
         }
     }
 
@@ -364,8 +374,14 @@ struct ContentView: View {
                 .buttonStyle(.bordered).tint(DepthStudioColors.muted)
 
                 Rectangle().fill(.white.opacity(0.08)).frame(height: 1)
-                sliderRow("HUD 透明度", value: $hudSettings.opacity, range: 0.2...1.0, suffix: "%", multiplier: 100)
-                sliderRow("HUD 字體大小", value: $hudSettings.fontScale, range: 0.7...1.4, suffix: "%", multiplier: 100)
+                HUDStyleEditor(itemTitle: HUDItemDefinition.all.first { $0.id == selectedHUDItem }?.title ?? "",
+                               style: selectedStyleBinding,
+                               originalColor: HUDSettings.originalColor(for: selectedHUDItem),
+                               onApplyToAll: applySelectedStyleToAll)
+
+                Rectangle().fill(.white.opacity(0.08)).frame(height: 1)
+                sliderRow("HUD 透明度", value: $hudSettings.opacity, range: 0.2...1.0, suffix: "%", multiplier: 100, id: "hud.opacitySlider")
+                sliderRow("HUD 字體大小", value: $hudSettings.fontScale, range: 0.7...1.4, suffix: "%", multiplier: 100, id: "hud.fontScaleSlider")
                 sliderRow("HUD 整體垂直偏移", value: $hudSettings.verticalOffset, range: -15...25, suffix: "%")
                 HStack {
                     Button("恢復預設位置") {
@@ -381,19 +397,19 @@ struct ContentView: View {
                     .buttonStyle(.bordered).tint(DepthStudioColors.muted)
                 }
                 HStack(spacing: 8) {
-                    Text(hasCustomDefaultLayout ? "目前預設：你設定的排版" : "目前預設：原廠排版")
+                    Text(savedPresetSlots.contains(1) ? "目前預設：預設1（你設定的排版）" : "目前預設：原廠排版")
                         .font(.caption2).foregroundStyle(DepthStudioColors.muted)
-                    if hasCustomDefaultLayout {
+                    if savedPresetSlots.contains(1) {
                         Button("改回原廠預設") {
                             HUDSettings.clearCustomDefaultLayout()
-                            hasCustomDefaultLayout = false
-                            statusMessage = "已清除自訂預設；「恢復預設位置」會回到原廠排版。"
+                            savedPresetSlots = HUDSettings.savedPresetSlots()
+                            statusMessage = "已清除預設1；「恢復預設位置」會回到原廠排版。"
                         }
                         .font(.caption2)
                         .buttonStyle(.bordered).tint(DepthStudioColors.muted)
                     }
                 }
-                Text("排版模式開啟時，直接拖曳預覽中的任一 HUD 欄位；位置會依畫面比例儲存，項目中心會吸附對齊其他可見欄位。")
+                Text("排版模式開啟時，直接拖曳預覽中的任一 HUD 欄位；位置會依畫面比例儲存，項目中心會吸附到畫面正中央（依目前版型）及其他可見欄位。")
                     .font(.caption2).foregroundStyle(.secondary)
             }
             .padding(.top, 10)
@@ -479,15 +495,15 @@ struct ContentView: View {
 
     private var exportSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            sectionTitle("06 / 輸出影片", subtitle: "輸出 4K 等級 MP4，依選擇的版型裁切，保留來源影像與音訊。")
-            let outputSize = ExportSizing.renderSize(aspect: stageRatio)
-            Text("輸出規格：\(playback.hasVideo ? outputAspect.title : "原始")・\(Int(outputSize.width)) × \(Int(outputSize.height))")
+            sectionTitle("06 / 輸出影片", subtitle: "依來源影片的畫質輸出 MP4，依選擇的版型裁切，保留來源影像與音訊。")
+            Text(outputSpecText)
                 .font(.caption.weight(.semibold)).foregroundStyle(DepthStudioColors.muted)
+                .accessibilityIdentifier("export.spec")
             Button(action: exportVideo) {
                 HStack {
                     if isExporting { ProgressView().tint(.black) }
-                    Image(systemName: "4k.tv")
-                    Text(isExporting ? "正在輸出影片…" : "輸出高畫質影片（至少 4K）")
+                    Image(systemName: "square.and.arrow.down.on.square")
+                    Text(isExporting ? "正在輸出影片…" : "輸出影片")
                 }
                 .font(.headline.weight(.bold))
                 .frame(maxWidth: .infinity)
@@ -497,6 +513,7 @@ struct ContentView: View {
             }
             .buttonStyle(.plain)
             .disabled(!canExport)
+            .accessibilityIdentifier("export.start")
 
             if isExporting { ProgressView(value: exportProgress).tint(DepthStudioColors.cyan) }
             Text(isExporting ? exportClock.label(progress: exportProgress) : exportInfo)
@@ -525,6 +542,25 @@ struct ContentView: View {
         }
     }
 
+    /// 「輸出規格：9:16・1080 × 1920（1080P，依來源畫質）」
+    private var outputSpecText: String {
+        guard playback.hasVideo else { return "輸出規格：匯入影片後依來源畫質決定（最高 4K）" }
+        guard let source = playback.videoSize else { return "輸出規格：\(outputAspect.title)・正在讀取來源畫質…" }
+        let size = ExportSizing.renderSize(aspect: stageRatio, sourceSize: source)
+        return "輸出規格：\(outputAspect.title)・\(Int(size.width)) × \(Int(size.height))（\(ExportSizing.qualityLabel(for: size))，依來源畫質）"
+    }
+
+    private var selectedStyleBinding: Binding<HUDItemStyle> {
+        Binding(get: { hudSettings.style(for: selectedHUDItem) },
+                set: { hudSettings.setStyle($0, for: selectedHUDItem) })
+    }
+
+    private func applySelectedStyleToAll() {
+        let style = hudSettings.style(for: selectedHUDItem)
+        for item in HUDItemDefinition.all { hudSettings.setStyle(style, for: item.id) }
+        statusMessage = "已將「\(HUDItemDefinition.all.first { $0.id == selectedHUDItem }?.title ?? "")」的字體顏色、陰影與對比套用到所有欄位。"
+    }
+
     private var currentRotation: Double { hudSettings.transforms[selectedHUDItem]?.rotation ?? 0 }
     private var selectedScaleBinding: Binding<Double> {
         Binding(get: { hudSettings.transforms[selectedHUDItem]?.scale ?? 1 }, set: { value in
@@ -545,10 +581,21 @@ struct ContentView: View {
         }
     }
 
-    private func saveCurrentLayoutAsDefault() {
-        hudSettings.saveLayoutAsDefault()
-        hasCustomDefaultLayout = true
-        statusMessage = "已將目前排版設為預設；之後「恢復預設位置」會回到這個排版，重新啟動 App 也一樣。"
+    private func savePreset(_ slot: Int) {
+        if slot == 1 { hudSettings.saveLayoutAsDefault() } else { hudSettings.savePreset(slot) }
+        savedPresetSlots = HUDSettings.savedPresetSlots()
+        statusMessage = slot == 1
+            ? "已將目前排版設為預設1；之後按「預設1」或「恢復預設位置」會回到這個排版，重新啟動 App 也一樣。"
+            : "已將目前排版設為預設2；之後按「預設2」會套用這個排版，重新啟動 App 也一樣。"
+    }
+
+    private func applyPreset(_ slot: Int) {
+        if hudSettings.applyPreset(slot) {
+            hudSettings.save()
+            statusMessage = "已套用預設\(slot)。"
+        } else {
+            statusMessage = "預設\(slot) 尚未設定；請先按「將目前排版設為預設\(slot)」。"
+        }
     }
 
     private func sectionTitle(_ title: String, subtitle: String) -> some View {
@@ -585,7 +632,7 @@ struct ContentView: View {
     }
 
     private func sliderRow(_ title: String, value: Binding<Double>, range: ClosedRange<Double>,
-                           suffix: String, multiplier: Double = 1) -> some View {
+                           suffix: String, multiplier: Double = 1, id: String? = nil) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text(title).font(.caption)
@@ -594,6 +641,7 @@ struct ContentView: View {
                     .font(.caption.weight(.semibold).monospacedDigit()).foregroundStyle(DepthStudioColors.cyan)
             }
             Slider(value: value, in: range).tint(DepthStudioColors.cyan)
+                .accessibilityIdentifier(id ?? title)
         }
     }
 
@@ -761,13 +809,13 @@ struct ContentView: View {
         do {
             let sync = try TimelineSync(offsetSeconds: hudSettings.syncOffset)
             let destination = FileManager.default.temporaryDirectory
-                .appendingPathComponent("DepthStudio_\(UUID().uuidString)_4K.mp4")
+                .appendingPathComponent("DepthStudio_\(UUID().uuidString).mp4")
             playback.pause()
             isExporting = true
             exportProgress = 0
             exportClock = ExportProgressClock()
             exportedVideoURL = nil
-            exportInfo = "正在分析來源影片並準備 4K MP4…"
+            exportInfo = "正在分析來源影片並準備 MP4…"
             statusMessage = "開始輸出，請保持 App 在前景並避免中途關閉。"
             let settings = DiveExportSettings(hudSettings: hudSettings, deviceName: record.computerModel ?? "DEPTH STUDIO")
             DiveVideoExporter().export(videoURL: videoURL, samples: record.samples, maximumDepth: maximumDepth, sync: sync,
@@ -780,7 +828,7 @@ struct ContentView: View {
                     switch result {
                     case .success(let outputURL):
                         exportedVideoURL = outputURL
-                        exportInfo = "4K MP4 已完成，已通過影片軌、尺寸、音訊及 MP4 容器檢查。"
+                        exportInfo = "MP4 已完成（\(outputSpecText.replacingOccurrences(of: "輸出規格：", with: ""))），已通過影片軌、尺寸、音訊及 MP4 容器檢查。"
                         Task { await saveExportToPhotos(outputURL) }
                     case .failure(let error):
                         errorMessage = "影片輸出失敗：\(error.localizedDescription)"
@@ -811,7 +859,7 @@ struct ContentView: View {
                     else { continuation.resume(throwing: error ?? PhotoSaveError.saveFailed) }
                 }
             }
-            statusMessage = "4K 影片已成功儲存至 iPhone 照片。"
+            statusMessage = "影片已成功儲存至 iPhone 照片。"
         } catch {
             errorMessage = "影片已輸出，但儲存到照片失敗：\(error.localizedDescription)。可使用分享按鈕另存。"
         }

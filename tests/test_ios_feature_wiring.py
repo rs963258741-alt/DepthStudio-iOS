@@ -45,7 +45,10 @@ class IOSFeatureWiringTests(unittest.TestCase):
                     "footerBrand", "maxDepth"]
         for item_id in expected:
             self.assertIn(f'id: "{item_id}"', SETTINGS)
-            self.assertIn(f'case "{item_id}"', HUD)
+            # The preview draws text fields from the export's shared text specs
+            # (DiveVideoExporter.textSpec), the identity group and chart itself.
+            self.assertIn(f'case "{item_id}"', HUD + EXPORTER)
+        self.assertIn("DiveVideoExporter.textSpec(for: id", HUD)
         self.assertIn("setAllVisible(_ visible: Bool)", SETTINGS)
 
     def test_editor_has_independent_transforms_visibility_identity_and_sync(self):
@@ -56,7 +59,8 @@ class IOSFeatureWiringTests(unittest.TestCase):
 
     def test_export_has_4k_audio_and_mp4_validation(self):
         self.assertIn("ExportSizing.renderSize(aspect:", EXPORTER)
-        self.assertIn("isFourKClass", EXPORTER)
+        self.assertIn("sourceSize: sourceSize", EXPORTER)
+        self.assertIn("customVideoCompositorClass = HUDVideoCompositor.self", EXPORTER)
         self.assertIn("sourceHadAudio", EXPORTER)
         self.assertIn("audioTrackMissing", EXPORTER)
         self.assertIn('"ftyp"', EXPORTER)

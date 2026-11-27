@@ -130,8 +130,8 @@ final class HUDLayoutUITests: XCTestCase {
         drag(item, dx: -40, dy: 40)
         let saved = relativeCenter(of: item, in: app)
 
-        app.buttons["layout.saveDefault"].tap()
-        let confirm = app.buttons["設為預設"]
+        app.buttons["layout.savePreset1"].tap()
+        let confirm = app.buttons["設為預設1"]
         XCTAssertTrue(confirm.waitForExistence(timeout: 5))
         confirm.tap()
 

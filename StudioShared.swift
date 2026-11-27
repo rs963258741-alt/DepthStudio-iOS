@@ -61,26 +61,69 @@ enum OutputAspect: String, CaseIterable, Identifiable, Codable {
 }
 
 enum ExportSizing {
-    /// Every export has the pixel count of 4K UHD (3840 × 2160). That gives exactly
-    /// 2160 × 3840 for 9:16 and 3840 × 2160 for 16:9, and keeps 1:1 (2880 × 2880) and
-    /// 4:5 within what the H.264 encoder accepts.
-    static let targetPixelCount: CGFloat = 3840 * 2160
+    /// The largest output: the pixel count of 4K UHD (3840 × 2160).
+    static let maximumPixelCount: CGFloat = 3840 * 2160
+    /// Used before the source video's size is known.
+    static let fallbackPixelCount: CGFloat = 1920 * 1080
 
-    static func renderSize(aspect ratio: CGFloat) -> CGSize {
+    /// Output frame for the chosen shape at the source video's quality: the frame has the
+    /// source's pixel count (at most 4K UHD's). A 4K source gives 3840 × 2160 (16:9) or
+    /// 2160 × 3840 (9:16), a 1080p source 1920 × 1080 or 1080 × 1920, and so on; other
+    /// shapes keep the same pixel count (1:1 from 4K is 2880 × 2880).
+    static func renderSize(aspect ratio: CGFloat, sourceSize: CGSize?) -> CGSize {
         let r = (ratio.isFinite && ratio > 0) ? ratio : 9.0 / 16.0
-        let width = (targetPixelCount * r).squareRoot()
-        let height = (targetPixelCount / r).squareRoot()
+        let pixels = pixelCount(of: sourceSize)
+        let width = (pixels * r).squareRoot()
+        let height = (pixels / r).squareRoot()
         return CGSize(width: multipleOf8(width), height: multipleOf8(height))
     }
 
-    /// The exported frame is accepted as 4K-class if it has at least 97% of the target pixels.
-    static func isFourKClass(_ size: CGSize) -> Bool {
-        size.width * size.height >= targetPixelCount * 0.97
+    static func pixelCount(of sourceSize: CGSize?) -> CGFloat {
+        guard let size = sourceSize, size.width.isFinite, size.height.isFinite,
+              size.width >= 16, size.height >= 16 else { return fallbackPixelCount }
+        return min(maximumPixelCount, size.width * size.height)
+    }
+
+    /// 「4K」「1080P」…: the quality class of an output frame (by its pixel count, so every
+    /// shape of the same source has the same label).
+    static func qualityLabel(for size: CGSize) -> String {
+        let pixels = size.width * size.height
+        if pixels >= 3840 * 2160 * 0.97 { return "4K" }
+        if pixels >= 2560 * 1440 * 0.97 { return "2K" }
+        if pixels >= 1920 * 1080 * 0.97 { return "1080P" }
+        if pixels >= 1280 * 720 * 0.97 { return "720P" }
+        return "\(Int(min(size.width, size.height)))P"
     }
 
     private static func multipleOf8(_ value: CGFloat) -> CGFloat {
         CGFloat(max(16, Int((value / 8).rounded()) * 8))
     }
+}
+
+/// Centre snapping while dragging a HUD field (positions are % of the stage, so the
+/// stage centre is 50 % in every output shape).
+enum HUDSnapping {
+    static let threshold = 2.0
+    static let center = 50.0
+
+    /// The field's new centre: the stage centre wins within the threshold, then the
+    /// centres of the other visible fields. `verticalOffset` is the HUD's overall vertical
+    /// offset, so the centre is where the field is shown.
+    static func snap(x: Double, y: Double, verticalOffset: Double, others: [HUDPoint]) -> HUDPoint {
+        var x = x
+        var y = y
+        var snappedX = false
+        var snappedY = false
+        if abs(x - center) < threshold { x = center; snappedX = true }
+        if abs(y + verticalOffset - center) < threshold { y = center - verticalOffset; snappedY = true }
+        for other in others {
+            if !snappedX, abs(x - other.x) < threshold { x = other.x; snappedX = true }
+            if !snappedY, abs(y - other.y) < threshold { y = other.y; snappedY = true }
+        }
+        return HUDPoint(x: min(99, max(1, x)), y: min(99, max(1, y)))
+    }
+
+    static func isCentered(_ value: Double) -> Bool { abs(value - center) < 0.001 }
 }
 
 enum HUDMetrics {
@@ -107,6 +150,8 @@ final class PlaybackController {
     private(set) var isPlaying = false
     /// Display width ÷ height of the loaded video (after rotation), once it is known.
     private(set) var videoAspect: CGFloat?
+    /// Display size in pixels of the loaded video (after rotation), once it is known.
+    private(set) var videoSize: CGSize?
 
     @ObservationIgnored private var timeObserver: Any?
     @ObservationIgnored private var statusObservation: NSKeyValueObservation?
@@ -138,7 +183,8 @@ final class PlaybackController {
         Task { @MainActor [weak self] in
             guard let info = await Self.loadVideoInfo(url: url) else { return }
             guard let self, self.url == url else { return }
-            self.videoAspect = info.aspect
+            self.videoAspect = info.size.width / info.size.height
+            self.videoSize = info.size
             if info.duration > 0 { self.duration = info.duration }
         }
     }
@@ -155,6 +201,7 @@ final class PlaybackController {
         duration = 0
         isPlaying = false
         videoAspect = nil
+        videoSize = nil
     }
 
     func seek(to seconds: Double) {
@@ -182,7 +229,7 @@ final class PlaybackController {
         seek(to: currentTime + delta)
     }
 
-    nonisolated static func loadVideoInfo(url: URL) async -> (aspect: CGFloat, duration: Double)? {
+    nonisolated static func loadVideoInfo(url: URL) async -> (size: CGSize, duration: Double)? {
         let asset = AVURLAsset(url: url)
         guard let track = try? await asset.loadTracks(withMediaType: .video).first,
               let natural = try? await track.load(.naturalSize),
@@ -190,7 +237,7 @@ final class PlaybackController {
         let rect = CGRect(origin: .zero, size: natural).applying(transform)
         guard abs(rect.width) > 0, abs(rect.height) > 0 else { return nil }
         let seconds = (try? await asset.load(.duration))?.seconds ?? 0
-        return (abs(rect.width) / abs(rect.height), seconds.isFinite ? seconds : 0)
+        return (CGSize(width: abs(rect.width), height: abs(rect.height)), seconds.isFinite ? seconds : 0)
     }
 }
 
@@ -254,36 +301,6 @@ struct PlaybackControls: View {
     }
 }
 
-/// A still frame of the video at (about) the given time, for the floating preview.
-struct VideoStillView: View {
-    let url: URL
-    let time: Double
-    @State private var image: UIImage?
-
-    var body: some View {
-        ZStack {
-            Color.black
-            if let image {
-                Image(uiImage: image).resizable().scaledToFill()
-            }
-        }
-        .clipped()
-        .task(id: "\(url.absoluteString)#\(Int((time * 4).rounded()))") {
-            if let frame = await Self.frame(url: url, time: time) { image = frame }
-        }
-    }
-
-    nonisolated static func frame(url: URL, time: Double) async -> UIImage? {
-        let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
-        generator.appliesPreferredTrackTransform = true
-        generator.maximumSize = CGSize(width: 720, height: 720)
-        guard let result = try? await generator.image(at: CMTime(seconds: max(0, time), preferredTimescale: 600)) else {
-            return nil
-        }
-        return UIImage(cgImage: result.image)
-    }
-}
-
 // MARK: - Pickers and panels
 
 /// 版型 picker: 原始 / 1:1 / 4:5 / 9:16 / 16:9.
@@ -313,14 +330,16 @@ struct OutputAspectPicker: View {
 }
 
 /// Semi-transparent floating preview shown while adjusting settings further down the page.
+/// Its content is the live video with the HUD drawn at the same proportions as the stage
+/// and the export, so every change shows immediately.
 struct FloatingPreviewPanel<Content: View>: View {
     let aspect: CGFloat
     let onClose: () -> Void
     @ViewBuilder let content: () -> Content
 
     private var size: CGSize {
-        if aspect >= 1 { return CGSize(width: 230, height: 230 / aspect) }
-        return CGSize(width: 150, height: 150 / aspect)
+        if aspect >= 1 { return CGSize(width: 250, height: 250 / aspect) }
+        return CGSize(width: min(170, 300 * aspect), height: min(170, 300 * aspect) / aspect)
     }
 
     var body: some View {
@@ -328,6 +347,8 @@ struct FloatingPreviewPanel<Content: View>: View {
             content()
                 .frame(width: size.width, height: size.height)
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("floatingPreview.stage")
                 .overlay(RoundedRectangle(cornerRadius: 12).stroke(DepthStudioColors.cyan.opacity(0.7), lineWidth: 1))
                 .opacity(0.88)
                 .allowsHitTesting(false)
@@ -342,6 +363,7 @@ struct FloatingPreviewPanel<Content: View>: View {
             .accessibilityIdentifier("floatingPreview.close")
         }
         .shadow(color: .black.opacity(0.5), radius: 10, y: 4)
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("floatingPreview")
     }
 }
@@ -360,6 +382,7 @@ struct FloatingPreviewButton: View {
                 .overlay(Capsule().stroke(DepthStudioColors.cyan.opacity(0.4), lineWidth: 1))
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier("floatingPreview.toggle")
     }
 }
 
@@ -396,12 +419,20 @@ struct ExportProgressClock {
     }
 }
 
-// MARK: - Layout presets (將目前排版設為預設)
+// MARK: - Layout presets (將目前排版設為預設1／預設2)
 
-/// Positions and per-item size/rotation of a HUD layout, saved as the user's own default.
+/// A saved HUD layout and look: positions and per-item size/rotation, plus (since 1.3)
+/// shown fields, 字體顏色／陰影／對比 and the overall HUD size, opacity and offset.
+/// Presets saved by 1.2 only have positions and transforms; the rest is then kept as is.
 struct HUDLayoutPreset: Codable, Equatable {
     var positions: [String: HUDPoint]
     var transforms: [String: HUDTransform]
+    var visibility: [String: Bool]?
+    var styles: [String: HUDItemStyle]?
+    var opacity: Double?
+    var fontScale: Double?
+    var verticalOffset: Double?
+    var identityScale: Double?
 }
 
 enum HUDLayoutPresetStore {
@@ -417,5 +448,74 @@ enum HUDLayoutPresetStore {
 
     static func clear(key: String, in defaults: UserDefaults = .standard) {
         defaults.removeObject(forKey: key)
+    }
+}
+
+/// The parts of the depth and pool HUD settings that presets save and restore.
+protocol HUDPresetSettings {
+    var positions: [String: HUDPoint] { get set }
+    var transforms: [String: HUDTransform] { get set }
+    var visibility: [String: Bool] { get set }
+    var styles: [String: HUDItemStyle] { get set }
+    var opacity: Double { get set }
+    var fontScale: Double { get set }
+    var verticalOffset: Double { get set }
+    var identityScale: Double { get set }
+    static var builtIn: Self { get }
+    static var presetKeys: [Int: String] { get }
+    func mergingDefaults() -> Self
+}
+
+extension HUDPresetSettings {
+    static func preset(_ slot: Int, in store: UserDefaults = .standard) -> HUDLayoutPreset? {
+        guard let key = presetKeys[slot] else { return nil }
+        return HUDLayoutPresetStore.load(key: key, from: store)
+    }
+
+    static func savedPresetSlots(in store: UserDefaults = .standard) -> Set<Int> {
+        Set(presetKeys.keys.filter { preset($0, in: store) != nil })
+    }
+
+    /// 「將目前排版設為預設1／2」: saves the current layout and look, kept across restarts.
+    func savePreset(_ slot: Int, in store: UserDefaults = .standard) {
+        guard let key = Self.presetKeys[slot] else { return }
+        let preset = HUDLayoutPreset(positions: positions, transforms: transforms, visibility: visibility,
+                                     styles: styles, opacity: opacity, fontScale: fontScale,
+                                     verticalOffset: verticalOffset, identityScale: identityScale)
+        HUDLayoutPresetStore.save(preset, key: key, to: store)
+    }
+
+    static func clearPreset(_ slot: Int, in store: UserDefaults = .standard) {
+        guard let key = presetKeys[slot] else { return }
+        HUDLayoutPresetStore.clear(key: key, in: store)
+    }
+
+    /// 「預設1／預設2」: applies a saved preset. Returns false if the slot is empty.
+    @discardableResult
+    mutating func applyPreset(_ slot: Int, using store: UserDefaults = .standard) -> Bool {
+        guard let preset = Self.preset(slot, in: store) else { return false }
+        let builtIn = Self.builtIn
+        positions = builtIn.positions.merging(preset.positions) { _, saved in saved }
+        transforms = builtIn.transforms.merging(preset.transforms) { _, saved in saved }
+        if let saved = preset.visibility { visibility = builtIn.visibility.merging(saved) { _, value in value } }
+        if let saved = preset.styles { styles = saved }
+        if let saved = preset.opacity { opacity = saved }
+        if let saved = preset.fontScale { fontScale = saved }
+        if let saved = preset.verticalOffset { verticalOffset = saved }
+        if let saved = preset.identityScale { identityScale = saved }
+        self = mergingDefaults()
+        return true
+    }
+
+    /// 「恢復預設位置」: positions and per-item size/rotation of preset 1, or the built-in layout.
+    mutating func restoreDefaultPositions(using store: UserDefaults = .standard) {
+        let builtIn = Self.builtIn
+        if let preset = Self.preset(1, in: store) {
+            positions = builtIn.positions.merging(preset.positions) { _, custom in custom }
+            transforms = builtIn.transforms.merging(preset.transforms) { _, custom in custom }
+        } else {
+            positions = builtIn.positions
+            transforms = builtIn.transforms
+        }
     }
 }

@@ -29,7 +29,7 @@ struct PoolHUDItemDefinition: Identifiable, Hashable {
     static let liveIDs: Set<String> = ["hudClock", "distanceValue", "elapsedValue", "lapValue", "speedValue"]
 }
 
-struct PoolHUDSettings: Codable, Equatable {
+struct PoolHUDSettings: Codable, Equatable, HUDPresetSettings {
     static let storageKey = "depthstudio.native.pool-hud-settings.v1"
     /// Pool freediving disciplines: dynamic with fins, with bi-fins, and no fins.
     static let disciplines = ["DYN", "DYNB", "DNF"]
@@ -45,6 +45,8 @@ struct PoolHUDSettings: Codable, Equatable {
     var country: String
     var identityScale: Double
     var discipline: String
+    /// 字體顏色、陰影、對比 of each field; fields without an entry keep their original look.
+    var styles: [String: HUDItemStyle]
 
     init() {
         positions = [
@@ -81,6 +83,25 @@ struct PoolHUDSettings: Codable, Equatable {
         country = "chinesetaipei"
         identityScale = 0.80
         discipline = "DYNB"
+        styles = [:]
+    }
+
+    /// Settings saved by older versions have no `styles`: missing values fall back to the
+    /// defaults instead of discarding the whole settings.
+    init(from decoder: Decoder) throws {
+        let defaults = PoolHUDSettings()
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        positions = try c.decodeIfPresent([String: HUDPoint].self, forKey: .positions) ?? defaults.positions
+        transforms = try c.decodeIfPresent([String: HUDTransform].self, forKey: .transforms) ?? defaults.transforms
+        visibility = try c.decodeIfPresent([String: Bool].self, forKey: .visibility) ?? defaults.visibility
+        opacity = try c.decodeIfPresent(Double.self, forKey: .opacity) ?? defaults.opacity
+        fontScale = try c.decodeIfPresent(Double.self, forKey: .fontScale) ?? defaults.fontScale
+        verticalOffset = try c.decodeIfPresent(Double.self, forKey: .verticalOffset) ?? defaults.verticalOffset
+        displayName = try c.decodeIfPresent(String.self, forKey: .displayName) ?? defaults.displayName
+        country = try c.decodeIfPresent(String.self, forKey: .country) ?? defaults.country
+        identityScale = try c.decodeIfPresent(Double.self, forKey: .identityScale) ?? defaults.identityScale
+        discipline = try c.decodeIfPresent(String.self, forKey: .discipline) ?? defaults.discipline
+        styles = (try? c.decodeIfPresent([String: HUDItemStyle].self, forKey: .styles)) ?? [:]
     }
 
     /// Loads saved pool settings. On first use the athlete name and flag are taken
@@ -118,38 +139,52 @@ struct PoolHUDSettings: Codable, Equatable {
         if result.displayName.count > 30 { result.displayName = String(result.displayName.prefix(30)) }
         if !Self.disciplines.contains(result.discipline) { result.discipline = "DYNB" }
         if HUDCountryOption.assetName(for: result.country) == nil { result.country = "chinesetaipei" }
+        result.styles = result.styles.mapValues(\.sanitized).filter { !$0.value.isDefault }
         return result
     }
 
-    /// Key of the user's own default pool layout (「將目前排版設為預設」).
+    static var builtIn: PoolHUDSettings { PoolHUDSettings() }
+
+    /// Key of preset 1 (「將目前排版設為預設1」), which 「恢復預設位置」 restores. It is the
+    /// key the single 「將目前排版設為預設」 of version 1.2 used, so that layout becomes preset 1.
     static let customDefaultLayoutKey = "depthstudio.native.pool-hud-default-layout.v1"
+    static let presetKeys = [1: customDefaultLayoutKey, 2: "depthstudio.native.pool-hud-layout-preset2.v1"]
 
     static func customDefaultLayout(in store: UserDefaults = .standard) -> HUDLayoutPreset? {
-        HUDLayoutPresetStore.load(key: customDefaultLayoutKey, from: store)
+        preset(1, in: store)
     }
 
     func saveLayoutAsDefault(in store: UserDefaults = .standard) {
-        HUDLayoutPresetStore.save(HUDLayoutPreset(positions: positions, transforms: transforms),
-                                  key: Self.customDefaultLayoutKey, to: store)
+        savePreset(1, in: store)
     }
 
     static func clearCustomDefaultLayout(in store: UserDefaults = .standard) {
-        HUDLayoutPresetStore.clear(key: customDefaultLayoutKey, in: store)
+        clearPreset(1, in: store)
     }
 
-    /// Restores the user's default layout if one is saved, otherwise the built-in layout.
+    /// Restores the positions and per-item size/rotation of preset 1 if it is saved,
+    /// otherwise the built-in layout.
     mutating func resetLayout(using store: UserDefaults = .standard) {
-        let builtIn = PoolHUDSettings()
-        if let preset = Self.customDefaultLayout(in: store) {
-            positions = builtIn.positions.merging(preset.positions) { _, custom in custom }
-            transforms = builtIn.transforms.merging(preset.transforms) { _, custom in custom }
-        } else {
-            positions = builtIn.positions
-            transforms = builtIn.transforms
-        }
+        restoreDefaultPositions(using: store)
     }
 
     mutating func setAllVisible(_ visible: Bool) {
         for item in PoolHUDItemDefinition.all { visibility[item.id] = visible }
+    }
+
+    func style(for id: String) -> HUDItemStyle { styles[id] ?? HUDItemStyle() }
+
+    mutating func setStyle(_ style: HUDItemStyle, for id: String) {
+        styles[id] = style.isDefault ? nil : style.sanitized
+    }
+
+    /// The colour a field's 「原色」 refers to.
+    static func originalColor(for id: String) -> HUDColor {
+        switch id {
+        case "distanceUnit": return .cyan
+        case "hudBrand", "elapsedLabel", "lapLabel", "speedLabel", "profileTitle", "footerBrand",
+             "totalDistance", "averageSpeed": return .muted
+        default: return .white
+        }
     }
 }

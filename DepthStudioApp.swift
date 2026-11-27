@@ -5,10 +5,9 @@ struct DepthStudioApp: App {
     init() {
         // UI tests start from the built-in layouts so their drag checks are repeatable.
         if ProcessInfo.processInfo.arguments.contains("-uitest-reset") {
-            for key in [HUDSettings.storageKey, HUDSettings.customDefaultLayoutKey,
-                        PoolHUDSettings.storageKey, PoolHUDSettings.customDefaultLayoutKey] {
-                UserDefaults.standard.removeObject(forKey: key)
-            }
+            let keys = [HUDSettings.storageKey, PoolHUDSettings.storageKey]
+                + Array(HUDSettings.presetKeys.values) + Array(PoolHUDSettings.presetKeys.values)
+            for key in keys { UserDefaults.standard.removeObject(forKey: key) }
         }
     }
 
