@@ -261,7 +261,7 @@ final class Round3UITests: XCTestCase {
         enter("深度潛水", in: app)
         let spec = app.staticTexts["export.spec"]
         bringIntoView(spec, in: app)
-        let expectSpec = { (text: String) in
+        func expectSpec(_ text: String) {
             let found = expectation(for: NSPredicate(format: "label CONTAINS %@", text), evaluatedWith: spec)
             wait(for: [found], timeout: 10)
         }
