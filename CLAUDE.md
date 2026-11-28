@@ -67,6 +67,11 @@ python3 -m py_compile scripts/*.py && bash -n scripts/ci_build.sh
 3. 失敗時：`mcp__github__get_job_logs`（`run_id`、`failed_only: true`、`return_content: true`、`tail_lines: 300`），從 `BUILD FAILURE SUMMARY` 找到錯誤，修正後再 commit/push。
 4. 成功時：用 `mcp__github__list_releases` 取得最新 Release，回報給使用者：版本、變更摘要、Release 連結，以及 AltStore 更新方式。
 
+### 發佈（2026-11 起的做法）
+
+- GitHub macOS 可用時：以 `mcp__github__actions_run_trigger` 對 `ios-build.yml` 做 `workflow_dispatch`（`ref` = 工作分支，inputs `notes`＝繁中更新說明、`publish`＝`"true"`），會用 `scripts/select_xcode.sh` 選的 Xcode 26 編譯並發佈 Release（build number = run number + 1000）。1.5.1 即以此發佈。
+- 測試用 `ios-tests.yml`（commit message 含 `[tests x3]`）。Codemagic 免費額度用完時回傳 `BILLING_NOT_ENABLED`。
+
 ### 備援：GitHub macOS 無法使用時改用 Codemagic（Claude 可直接操作）
 
 GitHub 的 macOS runner 曾整段時間拿不到機器（job 排隊 15 分鐘後被取消）。此時：
