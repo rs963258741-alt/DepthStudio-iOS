@@ -120,7 +120,7 @@ struct DiveLogLandmarks: Equatable {
 }
 
 /// Video times the user marks for syncing.
-enum SyncAnchor: String, CaseIterable, Identifiable {
+enum SyncPoint: String, CaseIterable, Identifiable {
     case descentStart, maximum, surface, point
 
     var id: String { rawValue }
@@ -160,7 +160,7 @@ struct SyncCheck: Equatable, Identifiable {
         }
     }
 
-    let anchor: SyncAnchor
+    let anchor: SyncPoint
     let watchTime: Double?
     let videoTime: Double?
     /// video − watch for this point.
@@ -169,7 +169,7 @@ struct SyncCheck: Equatable, Identifiable {
     let error: Double?
     let level: Level
 
-    var id: SyncAnchor { anchor }
+    var id: SyncPoint { anchor }
 
     static func level(forError error: Double) -> Level {
         let size = abs(error)
@@ -216,7 +216,7 @@ struct DiveSyncState: Equatable {
     func watchTime(forVideoTime time: Double) -> Double { time - delay }
     func videoTime(forWatchTime time: Double) -> Double { time + delay }
 
-    func videoTime(of anchor: SyncAnchor) -> Double? {
+    func videoTime(of anchor: SyncPoint) -> Double? {
         switch anchor {
         case .descentStart: return videoDescentStart
         case .maximum: return videoMaximum
@@ -249,7 +249,7 @@ struct DiveSyncState: Equatable {
 
     /// Checks a video time for an anchor: inside the video and in the dive's order
     /// (descent < maximum < surface). Returns a message when it is not allowed.
-    func problem(setting time: Double, for anchor: SyncAnchor, videoDuration: Double?) -> String? {
+    func problem(setting time: Double, for anchor: SyncPoint, videoDuration: Double?) -> String? {
         guard time.isFinite, time >= 0 else { return "時間格式不正確。" }
         if let videoDuration, videoDuration > 0, time > videoDuration + 0.05 {
             return "時間 \(Self.clock(time)) 超過影片長度 \(Self.clock(videoDuration))。"
@@ -272,7 +272,7 @@ struct DiveSyncState: Equatable {
 
     /// Sets (or clears) an anchor. Setting the maximum-depth time in 智慧／進階同步 applies
     /// the calculated offset; in 手動同步 it only places the orange marker.
-    mutating func set(_ anchor: SyncAnchor, to time: Double?, landmarks: DiveLogLandmarks?) {
+    mutating func set(_ anchor: SyncPoint, to time: Double?, landmarks: DiveLogLandmarks?) {
         let value = time.map { Self.rounded(max(0, $0)) }
         switch anchor {
         case .descentStart: videoDescentStart = value
@@ -329,7 +329,7 @@ struct DiveSyncState: Equatable {
 
     /// The maximum (the reference) and the optional descent and surface checks.
     func checks(_ landmarks: DiveLogLandmarks?) -> [SyncCheck] {
-        func check(_ anchor: SyncAnchor, watch: Double?, video: Double?) -> SyncCheck {
+        func check(_ anchor: SyncPoint, watch: Double?, video: Double?) -> SyncCheck {
             guard let video else {
                 return SyncCheck(anchor: anchor, watchTime: watch, videoTime: nil, difference: nil, error: nil, level: .notSet)
             }

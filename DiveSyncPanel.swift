@@ -15,7 +15,7 @@ struct DiveSyncPanel: View {
     let videoURL: URL?
 
     private enum Entry: Identifiable, Equatable {
-        case video(SyncAnchor)
+        case video(SyncPoint)
         case watchPoint
         var id: String {
             switch self {
@@ -241,7 +241,7 @@ struct DiveSyncPanel: View {
             .accessibilityIdentifier("sync.check.\(check.anchor.rawValue)")
     }
 
-    private func shortTitle(_ anchor: SyncAnchor) -> String {
+    private func shortTitle(_ anchor: SyncPoint) -> String {
         switch anchor {
         case .descentStart: return "開始下潛"
         case .maximum: return "最大深度"
@@ -429,7 +429,7 @@ struct DiveSyncPanel: View {
     }
 
     /// One time point: its time (tap to jump there), 擷取時間 / 重新擷取, and a menu to type or clear it.
-    private func anchorRow(_ anchor: SyncAnchor, title: String, required: Bool) -> some View {
+    private func anchorRow(_ anchor: SyncPoint, title: String, required: Bool) -> some View {
         let time = state.videoTime(of: anchor)
         return HStack(spacing: 8) {
             VStack(alignment: .leading, spacing: 1) {
@@ -511,12 +511,12 @@ struct DiveSyncPanel: View {
 
     // MARK: Actions
 
-    private func capture(_ anchor: SyncAnchor) {
+    private func capture(_ anchor: SyncPoint) {
         playback.pause()
         apply(playback.preciseTime, to: anchor)
     }
 
-    private func apply(_ time: Double, to anchor: SyncAnchor) {
+    private func apply(_ time: Double, to anchor: SyncPoint) {
         if let problem = state.problem(setting: time, for: anchor, videoDuration: videoDuration) {
             show(problem + "未套用。", isError: true)
             return
