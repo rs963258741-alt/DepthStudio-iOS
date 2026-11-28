@@ -59,7 +59,8 @@ jobs:
       - name: Build and package
         run: |
           # Build numbers keep rising with every run, so AltStore always sees an update.
-          export APP_BUILD_NUMBER=$((GITHUB_RUN_NUMBER + 100))
+          # (+1000: above the builds made on Codemagic, 1011–1013.)
+          export APP_BUILD_NUMBER=$((GITHUB_RUN_NUMBER + 1000))
           bash scripts/ci_build.sh
 
       - name: Keep IPA and build log

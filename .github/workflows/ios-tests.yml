@@ -1,0 +1,78 @@
+name: iOS simulator tests
+
+# Runs the XCTest unit/export tests and the XCUITest UI tests on an iPhone simulator
+# (scripts/ci_test.sh, the same script as the Codemagic workflow `depth-studio-tests`).
+#
+# Started by:
+#   - a push whose commit message contains "[tests]" (one full run) or "[tests xN]"
+#     (N full runs at the same time, N = 1…5), e.g. "[tests x3]" for three runs;
+#   - workflow_dispatch (once this file is on the default branch), optionally with a filter.
+# Every run prints the summary (passed / failed / failures) at the end of its log and keeps
+# the comparison images, results and crash logs as an artifact.
+
+on:
+  push:
+    branches: [main, "claude/**"]
+  workflow_dispatch:
+    inputs:
+      test_filter:
+        description: "Only these tests (space separated, e.g. DepthStudioUITests/SmartSyncUITests); empty = all"
+        required: false
+        default: ""
+      runs:
+        description: "How many runs at the same time (1-5)"
+        required: false
+        default: "1"
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    name: Plan test runs
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[tests')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      runs: ${{ steps.plan.outputs.runs }}
+    steps:
+      - id: plan
+        env:
+          MESSAGE: ${{ github.event.head_commit.message }}
+          RUNS_INPUT: ${{ inputs.runs }}
+        run: |
+          count="${RUNS_INPUT:-1}"
+          if [[ "$MESSAGE" =~ \[tests\ x([1-5])\] ]]; then count="${BASH_REMATCH[1]}"; fi
+          [[ "$count" =~ ^[1-5]$ ]] || count=1
+          runs=$(seq -s, 1 "$count")
+          echo "runs=[$runs]" >> "$GITHUB_OUTPUT"
+          echo "Test runs: [$runs]"
+
+  simulator-tests:
+    name: Simulator tests (run ${{ matrix.run }})
+    needs: plan
+    runs-on: macos-15
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        run: ${{ fromJSON(needs.plan.outputs.runs) }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Unit, export and UI tests
+        env:
+          TEST_FILTER: ${{ inputs.test_filter }}
+        run: bash scripts/ci_test.sh
+
+      - name: Keep results
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: test-results-${{ github.run_number }}-run${{ matrix.run }}
+          path: |
+            build/test-summary.txt
+            build/xcodebuild-test.log
+            build/test-artifacts
+          if-no-files-found: warn
+          retention-days: 14
