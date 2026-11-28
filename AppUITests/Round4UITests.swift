@@ -118,8 +118,17 @@ final class Round4UITests: XCTestCase {
         let header = app.staticTexts["04 / HUD 資訊顯示與隱藏"]
         bringIntoView(header, in: app)
         header.tap()
+        // The switches are in a lazy grid: rows below the screen exist only once scrolled to.
         let toggle = app.switches["visibility.depthGauge"]
-        XCTAssertTrue(toggle.waitForExistence(timeout: 5), "垂直深度指示計 switch in 03")
+        let window = app.windows.firstMatch.frame
+        let origin = app.coordinate(withNormalizedOffset: .zero)
+        for _ in 0..<8 where !toggle.exists {
+            origin.withOffset(CGVector(dx: 8, dy: window.maxY - 150))
+                .press(forDuration: 0.05, thenDragTo: origin.withOffset(CGVector(dx: 8, dy: window.maxY - 350)),
+                       withVelocity: .slow, thenHoldForDuration: 0.3)
+        }
+        XCTAssertTrue(toggle.waitForExistence(timeout: 5), "垂直深度指示計 switch in 04")
+        bringIntoView(toggle, in: app)
         XCTAssertEqual(toggle.label, "垂直深度指示計")
         XCTAssertEqual(toggle.value as? String, "1")
         toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
