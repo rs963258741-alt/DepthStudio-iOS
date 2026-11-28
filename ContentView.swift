@@ -1,4 +1,6 @@
 import SwiftUI
+import UIKit
+import Combine
 import AVKit
 import UniformTypeIdentifiers
 import PhotosUI
@@ -65,6 +67,7 @@ struct ContentView: View {
     /// settings fill the screen.
     @State private var previewScrolledAway = false
     @State private var syncFillsScreen = false
+    @State private var keyboardShown = false
     @State private var outputAspect: OutputAspect = .original
     @State private var showingFloatingPreview = false
     /// Preset slot (1 or 2) waiting for 「設為預設」 confirmation.
@@ -104,7 +107,7 @@ struct ContentView: View {
     /// The sync of the stage, the floating and docked previews and the export.
     private var currentSync: TimelineSync { syncState.timelineSync }
     private var showsDockedPreview: Bool {
-        playback.hasVideo && previewScrolledAway && syncFillsScreen && !showingFloatingPreview
+        playback.hasVideo && previewScrolledAway && syncFillsScreen && !showingFloatingPreview && !keyboardShown
     }
 
     var body: some View {
@@ -160,6 +163,9 @@ struct ContentView: View {
                 .transition(.opacity)
             }
         }
+        // While typing (e.g. the offset), the keyboard and the dock would leave little room.
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in keyboardShown = true }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in keyboardShown = false }
         .overlay(alignment: .topTrailing) {
             if showingFloatingPreview {
                 FloatingPreviewPanel(aspect: stageRatio, onClose: { showingFloatingPreview = false }) {

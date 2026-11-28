@@ -161,7 +161,8 @@ final class SmartSyncUITests: XCTestCase {
         waitFor(time, "value == %@", "00:01.0")
         // Demo maximum first at 00:17.0 → data shown 16 s earlier.
         waitFor(delayLabel(app), "label == %@", "偏移 −16.0 秒")
-        XCTAssertEqual(app.staticTexts["sync.result"].label, "數據提前 16.0 秒顯示")
+        XCTAssertEqual(delayLabel(app).value as? String, "數據提前 16.0 秒顯示")
+        XCTAssertFalse(app.staticTexts["目前同步"].exists, "the 目前同步 block was removed (1.5.1)")
         XCTAssertEqual(any("sync.maximum.capture", in: app).label, "重新擷取")
         // The preview reads the log at 00:17: the maximum depth.
         let depth = stage(app).descendants(matching: .any)["hud.depthValue"]
@@ -280,6 +281,31 @@ final class SmartSyncUITests: XCTestCase {
         bringIntoView(export, in: app, top: 470)
         let docked = dock.exists
         print("[ui-test] dock while at the export: \(docked)")
+    }
+
+    /// 泳池平潛 (1.5.1): the same docked preview while editing 02 泳池設定與時間節點.
+    func testPoolPreviewStaysVisibleWhileEditingTheTimeline() {
+        let app = launch()
+        enter("泳池平潛", in: app)
+        let dock = any("dockedPreview", in: app)
+        let window = app.windows.firstMatch.frame
+        let origin = app.coordinate(withNormalizedOffset: .zero)
+        for _ in 0..<10 where !dock.exists {
+            if stage(app).frame.maxY < window.minY { break }
+            origin.withOffset(CGVector(dx: 8, dy: window.maxY - 150))
+                .press(forDuration: 0.05, thenDragTo: origin.withOffset(CGVector(dx: 8, dy: window.maxY - 400)),
+                       withVelocity: .slow, thenHoldForDuration: 0.3)
+        }
+        XCTAssertTrue(dock.waitForExistence(timeout: 5), "pool preview docked while editing the timeline")
+        XCTAssertTrue(dock.buttons["playback.toggle"].exists, "with the playback controls")
+        XCTAssertTrue(app.staticTexts["02 / 泳池設定與時間節點"].exists)
+        screenshot("pool-docked-preview", app)
+
+        // The timeline controls below it still work: jump to the start mark.
+        let start = app.buttons["node.time.0.0"]
+        bringIntoView(start, in: app, top: 470)
+        start.tap()
+        XCTAssertTrue(dock.exists || stage(app).exists)
     }
 
     func testNewDiveDataResetsTheSync() {

@@ -52,13 +52,14 @@ final class Round3UITests: XCTestCase {
     }
 
     /// Scrolls the page (dragging the left margin) until the element is on screen.
-    private func bringIntoView(_ element: XCUIElement, in app: XCUIApplication) {
+    /// `top` 470 keeps controls of the timeline / sync section below the docked preview.
+    private func bringIntoView(_ element: XCUIElement, in app: XCUIApplication, top: CGFloat = 140) {
         let window = app.windows.firstMatch.frame
-        let topY = window.minY + 140, bottomY = window.maxY - 140
+        let topY = window.minY + top, bottomY = window.maxY - 140
         for _ in 0..<8 {
             let midY = element.frame.midY
             if midY >= topY && midY <= bottomY { return }
-            let needed = midY - window.midY
+            let needed = midY - (topY + bottomY) / 2
             let distance = min(abs(needed), bottomY - topY)
             let fromY = needed > 0 ? bottomY : topY
             let toY = needed > 0 ? bottomY - distance : topY + distance
@@ -222,7 +223,7 @@ final class Round3UITests: XCTestCase {
         let app = launch()
         enter("泳池平潛", in: app)
         let analyze = app.buttons["ai.analyze"]
-        bringIntoView(analyze, in: app)
+        bringIntoView(analyze, in: app, top: 470)
         let enabled = expectation(for: NSPredicate(format: "isEnabled == true"), evaluatedWith: analyze)
         wait(for: [enabled], timeout: 15)
         analyze.tap()

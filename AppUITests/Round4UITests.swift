@@ -38,13 +38,14 @@ final class Round4UITests: XCTestCase {
     private func value(_ element: XCUIElement) -> String { element.value as? String ?? "" }
 
     /// Scrolls the page (dragging the left margin) until the element is on screen.
-    private func bringIntoView(_ element: XCUIElement, in app: XCUIApplication) {
+    /// `top` 470 keeps controls of the timeline / sync section below the docked preview.
+    private func bringIntoView(_ element: XCUIElement, in app: XCUIApplication, top: CGFloat = 140) {
         let window = app.windows.firstMatch.frame
-        let topY = window.minY + 140, bottomY = window.maxY - 140
+        let topY = window.minY + top, bottomY = window.maxY - 140
         for _ in 0..<10 {
             let midY = element.frame.midY
             if midY >= topY && midY <= bottomY { return }
-            let needed = midY - window.midY
+            let needed = midY - (topY + bottomY) / 2
             let distance = min(abs(needed), bottomY - topY)
             let fromY = needed > 0 ? bottomY : topY
             let toY = needed > 0 ? bottomY - distance : topY + distance
@@ -64,7 +65,7 @@ final class Round4UITests: XCTestCase {
 
     /// Steps the video by +0.5 s `count` times (the step pauses and seeks).
     private func step(_ count: Int, in app: XCUIApplication) {
-        let button = app.buttons["+0.5s"]
+        let button = app.buttons["+0.5s"].firstMatch   // the docked preview has the same buttons
         XCTAssertTrue(button.waitForExistence(timeout: 5), "+0.5 s step")
         bringIntoView(button, in: app)
         for _ in 0..<count { button.tap() }
@@ -134,7 +135,7 @@ final class Round4UITests: XCTestCase {
     private func typeTime(_ text: String, forNode distance: String, in app: XCUIApplication) {
         let menu = app.buttons["node.menu.\(distance)"]
         XCTAssertTrue(menu.waitForExistence(timeout: 5), "menu of \(distance) m")
-        bringIntoView(menu, in: app)
+        bringIntoView(menu, in: app, top: 470)
         menu.tap()
         let entry = app.buttons["輸入時間…"]
         XCTAssertTrue(entry.waitForExistence(timeout: 5))

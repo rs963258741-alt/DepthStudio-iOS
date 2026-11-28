@@ -58,6 +58,17 @@ class LayoutTests(unittest.TestCase):
         self.assertEqual(sorted(number for number, _ in titles), ["01", "02", "03", "04", "05", "06"])
         self.assertIn(("02", "潛水紀錄摘要與時間同步"), titles)
 
+    def test_current_sync_block_removed_and_pool_has_the_docked_preview(self):
+        # 1.5.1: the visible 「目前同步」 block is gone (only an accessibility label remains).
+        self.assertNotIn('Text("目前同步")', PANEL)
+        self.assertIn('.accessibilityIdentifier("sync.delay")', PANEL)
+        # Pool mode docks its preview while 02 泳池設定與時間節點 fills the screen.
+        self.assertIn("DockedPreviewPanel(aspect: stageRatio, playback: playback)", POOL)
+        self.assertIn("PoolFloatingPreview(playback: playback, timeline: timeline, settings: hudSettings)", POOL)
+        for view in (CONTENT, POOL):
+            self.assertIn("!showingFloatingPreview && !keyboardShown", view)
+            self.assertIn("keyboardWillShowNotification", view)
+
     def test_docked_preview_does_not_cover_other_sections(self):
         self.assertIn("DockedPreviewPanel(aspect: stageRatio, playback: playback)", CONTENT)
         self.assertIn("&& !showingFloatingPreview", CONTENT)

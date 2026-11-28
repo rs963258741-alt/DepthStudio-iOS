@@ -120,25 +120,17 @@ struct DiveSyncPanel: View {
         }
     }
 
+    /// The applied offset for VoiceOver and the UI tests. (The visible 「目前同步」 block was
+    /// removed in 1.5.1 to keep the section compact; the offset still shows in the message
+    /// after setting a time and in 手動同步's 數據時間偏移.)
     private var resultBanner: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack {
-                Text("目前同步").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                Spacer()
-                Text("偏移 \(DiveSyncState.signedSeconds(state.delay))")
-                    .font(.caption.weight(.bold).monospacedDigit())
-                    .foregroundStyle(DepthStudioColors.cyan)
-                    .accessibilityIdentifier("sync.delay")
-            }
-            Text(DiveSyncState.describe(state.delay))
-                .font(.subheadline.weight(.semibold))
-                .accessibilityIdentifier("sync.result")
-            Text("數據查詢時間 ＝ 影片時間 − 偏移；預覽與輸出影片使用同一個同步結果。")
-                .font(.caption2).foregroundStyle(.secondary)
-        }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DepthStudioColors.background, in: RoundedRectangle(cornerRadius: 12))
+        Color.clear
+            .frame(width: 1, height: 1)
+            .accessibilityElement()
+            .accessibilityAddTraits(.isStaticText)
+            .accessibilityLabel("偏移 \(DiveSyncState.signedSeconds(state.delay))")
+            .accessibilityValue(DiveSyncState.describe(state.delay))
+            .accessibilityIdentifier("sync.delay")
     }
 
     @ViewBuilder

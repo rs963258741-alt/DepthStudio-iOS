@@ -1,4 +1,6 @@
 import SwiftUI
+import UIKit
+import Combine
 import AVKit
 import PhotosUI
 import Photos
@@ -30,6 +32,11 @@ struct PoolModeView: View {
     @State private var playback = PlaybackController()
     @State private var outputAspect: OutputAspect = .original
     @State private var showingFloatingPreview = false
+    /// The docked preview shows while the main preview has scrolled away and 02 (泳池設定
+    ///與時間節點) fills the screen, like the depth mode's time sync.
+    @State private var previewScrolledAway = false
+    @State private var timelineFillsScreen = false
+    @State private var keyboardShown = false
     /// Preset slot (1 or 2) waiting for 「設為預設」 confirmation.
     @State private var confirmingPresetSlot: Int?
     @State private var savedPresetSlots = PoolHUDSettings.savedPresetSlots()
@@ -65,6 +72,9 @@ struct PoolModeView: View {
     private var stageRatio: CGFloat {
         playback.hasVideo ? outputAspect.ratio(source: playback.videoAspect) : 9.0 / 16.0
     }
+    private var showsDockedPreview: Bool {
+        playback.hasVideo && previewScrolledAway && timelineFillsScreen && !showingFloatingPreview && !keyboardShown
+    }
 
     var body: some View {
         NavigationStack {
@@ -73,7 +83,13 @@ struct PoolModeView: View {
                     header
                     importSection
                     previewSection
+                        .onGeometryChange(for: Bool.self) { proxy in
+                            proxy.frame(in: .named("poolScroll")).maxY < 8
+                        } action: { previewScrolledAway = $0 }
                     timelineSection
+                        .onGeometryChange(for: Bool.self) { proxy in
+                            proxy.frame(in: .named("poolScroll")).maxY > 420
+                        } action: { timelineFillsScreen = $0 }
                     hudAppearanceSection
                     visibilitySection
                     identitySection
@@ -86,6 +102,7 @@ struct PoolModeView: View {
                 .frame(maxWidth: .infinity, alignment: .top)
             }
             .scrollIndicators(.hidden)
+            .coordinateSpace(.named("poolScroll"))
             .scrollDismissesKeyboard(.interactively)
             .toolbar(.hidden, for: .navigationBar)
             .toolbar {
@@ -96,6 +113,17 @@ struct PoolModeView: View {
             }
             .background(DepthStudioColors.background.ignoresSafeArea())
         }
+        .overlay(alignment: .top) {
+            if showsDockedPreview {
+                DockedPreviewPanel(aspect: stageRatio, playback: playback) {
+                    PoolFloatingPreview(playback: playback, timeline: timeline, settings: hudSettings)
+                }
+                .padding(.top, 6)
+                .transition(.opacity)
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in keyboardShown = true }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in keyboardShown = false }
         .overlay(alignment: .topTrailing) {
             if showingFloatingPreview {
                 FloatingPreviewPanel(aspect: stageRatio, onClose: { showingFloatingPreview = false }) {
