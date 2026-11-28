@@ -47,6 +47,7 @@ jobs:
         run: |
           python3 -m py_compile scripts/*.py
           bash -n scripts/ci_build.sh
+          bash -n scripts/select_xcode.sh
 
   build:
     name: Build IPA (macOS)
@@ -55,6 +56,9 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6
+
+      - name: Select Xcode (newest installed, like Codemagic's Xcode 26)
+        run: bash scripts/select_xcode.sh
 
       - name: Build and package
         run: |

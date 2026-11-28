@@ -60,6 +60,9 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Select Xcode (newest installed, like Codemagic's Xcode 26)
+        run: bash scripts/select_xcode.sh
+
       - name: Unit, export and UI tests
         env:
           TEST_FILTER: ${{ inputs.test_filter }}

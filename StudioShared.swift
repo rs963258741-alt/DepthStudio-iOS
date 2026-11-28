@@ -156,6 +156,9 @@ final class PlaybackController {
     private(set) var frameDuration: Double?
 
     @ObservationIgnored private var timeObserver: Any?
+    /// The target of a seek that has not finished yet: the player still reports the old time
+    /// until then, so 擷取時間 right after a step uses this.
+    @ObservationIgnored private var pendingSeekTarget: Double?
     @ObservationIgnored private var statusObservation: NSKeyValueObservation?
 
     var hasVideo: Bool { player != nil }
@@ -207,13 +210,19 @@ final class PlaybackController {
         videoAspect = nil
         videoSize = nil
         frameDuration = nil
+        pendingSeekTarget = nil
     }
 
     func seek(to seconds: Double) {
         guard let player else { return }
         let upper = duration > 0 ? duration : max(0, seconds)
         let safe = min(max(0, seconds), upper)
-        player.seek(to: CMTime(seconds: safe, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+        pendingSeekTarget = safe
+        player.seek(to: CMTime(seconds: safe, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                if self?.pendingSeekTarget == safe { self?.pendingSeekTarget = nil }
+            }
+        }
         currentTime = safe
     }
 
@@ -237,6 +246,7 @@ final class PlaybackController {
     /// The player's own current time (not the last periodic update), for capturing a
     /// video time exactly where the video is.
     var preciseTime: Double {
+        if let pendingSeekTarget { return pendingSeekTarget }
         guard let seconds = player?.currentTime().seconds, seconds.isFinite else { return currentTime }
         let upper = duration > 0 ? duration : seconds
         return min(max(0, seconds), upper)

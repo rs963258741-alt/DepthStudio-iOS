@@ -82,6 +82,7 @@ GitHub 的 macOS runner 曾整段時間拿不到機器（job 排隊 15 分鐘後
 
 - `AppTests/`（XCTest）：泳池計算、輸出尺寸、預設1／2、樣式、吸附、實際輸出含 HUD 的影片並逐格比對、輸出與預覽比對；圖片寫到 `build/test-artifacts/`（`*-preview-vs-export.png`、`*-expected-vs-exported.png`、`stage-vs-floating-preview.png`）。
 - `AppUITests/`（XCUITest）：拖曳每個 HUD 欄位、排版開關、預設1／2 儲存與套用（含重新啟動）、各版型置中吸附、浮動預覽即時且等比例、AI 提醒、樣式控制、輸出規格；`SmartSyncUITests`：區塊順序、三種同步模式、擷取時間、進階驗證、手動時間軸與偏移、固定預覽、另存新檔。同步區塊的控制項請捲到畫面 470 pt 以下再點（固定預覽可能蓋住上方）。
+- GitHub 的 macos-15 預設是 Xcode 16.4；`scripts/select_xcode.sh` 會選最新安裝的正式版 Xcode（與 Codemagic 的 Xcode 26 一致），`ios-build.yml` 與 `ios-tests.yml` 都會先執行它。用 Xcode 16.4 時泳池 `footerBrand` 拖曳測試會失敗（Codemagic／Xcode 26 正常）。
 - 執行：`scripts/ci_test.sh`；GitHub Actions `.github/workflows/ios-tests.yml`（commit message 含 `[tests]` 跑一次、`[tests x3]` 同時跑三次；檔案進到 main 後也可 `workflow_dispatch`；macos-15；結果在 log 結尾的 TEST SUMMARY 與 artifact `test-results-<N>`）或 Codemagic workflow `depth-studio-tests`（`POST /builds` 的 `workflowId`；2026-11 免費額度用完時回傳 `BILLING_NOT_ENABLED`）。修改 HUD、輸出或排版相關程式後都要跑一次，並下載比對圖檢查。
 - 只跑部分測試：環境變數 `TEST_FILTER`（空白或逗號分隔，例如 `DepthStudioTests/ExportPipelineTests DepthStudioUITests/Round3UITests`），用 Codemagic `POST /builds` 的 `"environment": {"variables": {"TEST_FILTER": "..."}}` 帶入。
 - 含 HUD 的完整輸出在模擬器可以實際執行（自訂合成器不經過 Core Animation 的輸出工具）：`ExportPipelineTests` 會輸出含 HUD 的影片，逐格與「來源畫面＋該時間的 HUD」比對，並確認數值會變、即時欄位在潛水期間出現。
