@@ -489,8 +489,8 @@ struct DiveSyncPanel: View {
             }
             HStack(spacing: 6) {
                 videoStep("上一影格", systemImage: "backward.frame", id: "video.previousFrame") { playback.stepFrames(-1) }
-                videoStep("0.1 秒", systemImage: "gobackward", id: "video.back") { playback.stepPrecisely(by: -0.1) }
-                videoStep("0.1 秒", systemImage: "goforward", id: "video.forward") { playback.stepPrecisely(by: 0.1) }
+                videoStep("後退 0.1 秒", systemImage: "gobackward", id: "video.back") { playback.stepPrecisely(by: -0.1) }
+                videoStep("前進 0.1 秒", systemImage: "goforward", id: "video.forward") { playback.stepPrecisely(by: 0.1) }
                 videoStep("下一影格", systemImage: "forward.frame", id: "video.nextFrame") { playback.stepFrames(1) }
             }
         }
@@ -500,12 +500,14 @@ struct DiveSyncPanel: View {
 
     private func videoStep(_ title: String, systemImage: String, id: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Label(title, systemImage: systemImage)
-                .font(.caption2.weight(.semibold))
-                .labelStyle(.titleAndIcon)
-                .frame(maxWidth: .infinity)
+            VStack(spacing: 3) {
+                Image(systemName: systemImage).font(.caption.weight(.semibold))
+                Text(title).font(.caption2.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.8)
+            }
+            .frame(maxWidth: .infinity)
         }
         .buttonStyle(.bordered).tint(DepthStudioColors.muted)
+        .accessibilityLabel(title)
         .accessibilityIdentifier(id)
     }
 
@@ -860,7 +862,7 @@ struct DockedPreviewPanel<Video: View>: View {
             PlaybackControls(playback: playback)
         }
         .padding(10)
-        .background(DepthStudioColors.card.opacity(0.97), in: RoundedRectangle(cornerRadius: 16))
+        .background(DepthStudioColors.card, in: RoundedRectangle(cornerRadius: 16))
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(DepthStudioColors.cyan.opacity(0.35), lineWidth: 1))
         .shadow(color: .black.opacity(0.5), radius: 10, y: 4)
         .padding(.horizontal, 12)
