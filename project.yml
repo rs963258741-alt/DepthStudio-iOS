@@ -45,6 +45,9 @@ targets:
       - path: GarminFITParser.swift
       - path: DiveHUDOverlay.swift
       - path: DepthGauge.swift
+      - path: DiveSync.swift
+      - path: DiveSyncPanel.swift
+      - path: ExportNaming.swift
       - path: DiveVideoExporter.swift
       - path: DiveVideoPreview.swift
       - path: TimelineSync.swift
@@ -60,7 +63,7 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         PRODUCT_MODULE_NAME: DepthStudio
         TARGETED_DEVICE_FAMILY: "1"
-        MARKETING_VERSION: "1.4.0"
+        MARKETING_VERSION: "1.5.0"
         CURRENT_PROJECT_VERSION: "4"
         INFOPLIST_KEY_UILaunchStoryboardName: LaunchScreen
         PRODUCT_BUNDLE_IDENTIFIER: com.bananaflow.depthstudio

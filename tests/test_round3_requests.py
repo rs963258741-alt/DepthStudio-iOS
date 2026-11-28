@@ -23,7 +23,7 @@ class ExportTests(unittest.TestCase):
         self.assertIn("sourceSize: sourceSize", EXPORTER)
         self.assertIn("static let maximumPixelCount: CGFloat = 3840 * 2160", SHARED)
         for view in (DEPTH_VIEW, POOL_VIEW):
-            self.assertIn('"輸出影片"', view)
+            self.assertIn('"輸出影片（另存新檔）"', view)
             self.assertNotIn("輸出高畫質影片（至少 4K）", view)
             self.assertIn("ExportSizing.qualityLabel(for: size)", view)
 

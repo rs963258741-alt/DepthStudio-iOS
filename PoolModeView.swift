@@ -24,6 +24,8 @@ struct PoolModeView: View {
     @State private var showingFileImporter = false
     @State private var isImportingVideo = false
     @State private var videoURL: URL?
+    /// The imported video's own file name, used to name exports.
+    @State private var videoOriginalName: String?
     /// Not observed here on purpose: only the views that show the playback time read it.
     @State private var playback = PlaybackController()
     @State private var outputAspect: OutputAspect = .original
@@ -49,7 +51,7 @@ struct PoolModeView: View {
     @State private var exportProgress = 0.0
     @State private var exportedVideoURL: URL?
     @State private var exportClock = ExportProgressClock()
-    @State private var exportInfo = "依來源影片畫質輸出 MP4（4K 來源輸出 4K、1080P 來源輸出 1080P）；完成後可直接儲存到 iPhone 照片。"
+    @State private var exportInfo = "依來源影片畫質輸出 MP4（4K 來源輸出 4K、1080P 來源輸出 1080P）；完成後另存為新的照片項目，原始影片不變。"
     @State private var statusMessage = "已載入示範數據（50 m 泳池、150 m）。匯入平潛影片後，依序標記出發、轉身與出水時間。"
     @State private var errorMessage: String?
 
@@ -213,7 +215,7 @@ struct PoolModeView: View {
                     Image(systemName: "photo.on.rectangle").font(.title2).foregroundStyle(DepthStudioColors.cyan)
                     VStack(alignment: .leading, spacing: 3) {
                         Text("從照片匯入影片").font(.subheadline.weight(.bold)).foregroundStyle(.white)
-                        Text(isImportingVideo ? "正在載入影片…" : (videoURL?.lastPathComponent ?? "直接選擇 iPhone 相簿影片"))
+                        Text(isImportingVideo ? "正在載入影片…" : (videoOriginalName ?? videoURL?.lastPathComponent ?? "直接選擇 iPhone 相簿影片"))
                             .font(.caption2).foregroundStyle(.secondary).lineLimit(2)
                     }
                     Spacer(minLength: 0)
@@ -618,7 +620,7 @@ struct PoolModeView: View {
 
     private var exportSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            sectionTitle("06 / 輸出影片", subtitle: "依來源影片的畫質輸出 MP4，依選擇的版型裁切，保留來源影像與音訊。")
+            sectionTitle("06 / 輸出影片", subtitle: "依來源影片的畫質輸出新的 MP4，依選擇的版型裁切，保留來源影像與音訊。")
             Text(outputSpecText)
                 .font(.caption.weight(.semibold)).foregroundStyle(DepthStudioColors.muted)
                 .accessibilityIdentifier("export.spec")
@@ -626,7 +628,7 @@ struct PoolModeView: View {
                 HStack {
                     if isExporting { ProgressView().tint(.black) }
                     Image(systemName: "square.and.arrow.down.on.square")
-                    Text(isExporting ? "正在輸出影片…" : "輸出影片")
+                    Text(isExporting ? "正在輸出影片…" : "輸出影片（另存新檔）")
                 }
                 .font(.headline.weight(.bold))
                 .frame(maxWidth: .infinity)
@@ -637,6 +639,9 @@ struct PoolModeView: View {
             .buttonStyle(.plain)
             .disabled(!canExport)
             .accessibilityIdentifier("export.start")
+            Label("輸出影片不會覆蓋原始影片。", systemImage: "checkmark.shield")
+                .font(.caption2.weight(.semibold)).foregroundStyle(DepthStudioColors.muted)
+                .accessibilityIdentifier("export.keepsOriginal")
 
             if isExporting { ProgressView(value: exportProgress).tint(DepthStudioColors.cyan) }
             Text(isExporting ? exportClock.label(progress: exportProgress) : exportInfo)
@@ -1001,7 +1006,7 @@ struct PoolModeView: View {
             guard let imported = try await item.loadTransferable(type: ImportedMovie.self) else {
                 throw PoolVideoImportError.transferUnavailable
             }
-            applyImportedVideo(imported.url, displayName: imported.url.lastPathComponent)
+            applyImportedVideo(imported.url, displayName: imported.originalName ?? imported.url.lastPathComponent)
         } catch {
             errorMessage = "照片影片匯入失敗：\(error.localizedDescription)"
             statusMessage = "請重新選取影片，或改用「從檔案 App 選取影片」。"
@@ -1031,6 +1036,7 @@ struct PoolModeView: View {
         motionSignal = nil
         analysisMessage = nil
         videoURL = url
+        videoOriginalName = displayName
         playback.load(url: url)
         exportedVideoURL = nil
         // Times from the demo or a previous video do not apply to this one.
@@ -1047,8 +1053,9 @@ struct PoolModeView: View {
         do { timeline = try PoolTimeline(session: session, motion: motionSignal) }
         catch { errorMessage = "無法開始輸出：\(error.localizedDescription)"; return }
 
-        let destination = FileManager.default.temporaryDirectory
-            .appendingPathComponent("DepthStudio_Pool_\(UUID().uuidString).mp4")
+        // Always a new file; the imported video is never written to.
+        let destination = ExportNaming.nextOutputURL(originalName: videoOriginalName ?? videoURL.lastPathComponent,
+                                                     sourceURL: videoURL)
         playback.pause()
         isExporting = true
         exportProgress = 0
@@ -1072,7 +1079,8 @@ struct PoolModeView: View {
                     switch result {
                     case .success(let outputURL):
                         exportedVideoURL = outputURL
-                        exportInfo = "MP4 已完成（\(outputSpecText.replacingOccurrences(of: "輸出規格：", with: ""))），已通過影片軌、尺寸、音訊及 MP4 容器檢查。"
+                        ExportNaming.recordExport(at: outputURL, originalName: videoOriginalName ?? videoURL.lastPathComponent)
+                        exportInfo = "MP4 已完成：\(outputURL.lastPathComponent)（\(outputSpecText.replacingOccurrences(of: "輸出規格：", with: ""))），已通過影片軌、尺寸、音訊及 MP4 容器檢查。"
                         Task { await saveExportToPhotos(outputURL) }
                     case .failure(let error):
                         errorMessage = "影片輸出失敗：\(error.localizedDescription)"
@@ -1093,15 +1101,8 @@ struct PoolModeView: View {
             return
         }
         do {
-            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                PHPhotoLibrary.shared().performChanges({
-                    PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: url)
-                }) { success, error in
-                    if success { continuation.resume() }
-                    else { continuation.resume(throwing: error ?? PoolVideoImportError.photoSaveFailed) }
-                }
-            }
-            statusMessage = "影片已成功儲存至 iPhone 照片。"
+            try await PhotoLibrarySaver.saveNewVideo(at: url)
+            statusMessage = "影片已另存為新的照片項目（\(url.lastPathComponent)），原始影片沒有被修改。"
         } catch {
             errorMessage = "影片已輸出，但儲存到照片失敗：\(error.localizedDescription)。可使用分享按鈕另存。"
         }

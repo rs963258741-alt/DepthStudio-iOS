@@ -13,9 +13,11 @@ enum DepthStudioColors {
 }
 
 /// PhotosPicker's temporary movie URL is copied while the transfer remains valid.
-/// Shared by the depth and pool screens.
+/// Shared by the depth and pool screens. The copy is what the app works on; the video in
+/// Photos is never changed. `originalName` (e.g. IMG_1234.MOV) names the exports.
 struct ImportedMovie: Transferable {
     let url: URL
+    var originalName: String? = nil
     static var transferRepresentation: some TransferRepresentation {
         FileRepresentation(importedContentType: .movie) { received in
             let source = received.file
@@ -24,7 +26,7 @@ struct ImportedMovie: Transferable {
                 .appendingPathComponent("DepthStudio-\(UUID().uuidString)")
                 .appendingPathExtension(ext)
             try FileManager.default.copyItem(at: source, to: destination)
-            return ImportedMovie(url: destination)
+            return ImportedMovie(url: destination, originalName: source.lastPathComponent)
         }
     }
 }
@@ -51,8 +53,18 @@ struct ContentView: View {
     @State private var diveLogFileName: String? = "V8.18 示範資料"
     @State private var diveLogFormat: String? = "示範潛水紀錄"
     @State private var videoURL: URL?
+    /// The imported video's own file name (e.g. DJI_20261128.mp4), used to name exports.
+    @State private var videoOriginalName: String?
     /// Not observed here on purpose: only the views that show the playback time read it.
     @State private var playback = PlaybackController()
+    /// 時間同步 (智慧／進階／手動): the one offset the previews and the export use.
+    /// Reset whenever the video or the dive log changes.
+    @State private var syncState = DiveSyncState()
+    @State private var summaryExpanded = false
+    /// The docked preview shows while the main preview has scrolled away and the sync
+    /// settings fill the screen.
+    @State private var previewScrolledAway = false
+    @State private var syncFillsScreen = false
     @State private var outputAspect: OutputAspect = .original
     @State private var showingFloatingPreview = false
     /// Preset slot (1 or 2) waiting for 「設為預設」 confirmation.
@@ -67,7 +79,7 @@ struct ContentView: View {
     @State private var exportProgress = 0.0
     @State private var exportedVideoURL: URL?
     @State private var exportClock = ExportProgressClock()
-    @State private var exportInfo = "依來源影片畫質輸出 MP4（4K 來源輸出 4K、1080P 來源輸出 1080P）；完成後可直接儲存到 iPhone 照片。"
+    @State private var exportInfo = "依來源影片畫質輸出 MP4（4K 來源輸出 4K、1080P 來源輸出 1080P）；完成後另存為新的照片項目，原始影片不變。"
 
     private var diveLogContentTypes: [UTType] {
         var types: [UTType] = [.data, .xml]
@@ -87,6 +99,13 @@ struct ContentView: View {
     private var demoReading: DiveReading? {
         diveRecord.flatMap { (try? DiveDataInterpolator(samples: $0.samples))?.reading(at: 11.8) }
     }
+    /// Moments of the current dive log (maximum depth, descent, surface) for syncing.
+    private var landmarks: DiveLogLandmarks? { diveRecord.flatMap { DiveLogLandmarks(samples: $0.samples) } }
+    /// The sync of the stage, the floating and docked previews and the export.
+    private var currentSync: TimelineSync { syncState.timelineSync }
+    private var showsDockedPreview: Bool {
+        playback.hasVideo && previewScrolledAway && syncFillsScreen && !showingFloatingPreview
+    }
 
     var body: some View {
         ZStack {
@@ -98,11 +117,16 @@ struct ContentView: View {
                         header
                         importSection
                         previewSection
-                        if let diveRecord { diveSummary(diveRecord) }
+                            .onGeometryChange(for: Bool.self) { proxy in
+                                proxy.frame(in: .named("depthScroll")).maxY < 8
+                            } action: { previewScrolledAway = $0 }
+                        syncSection
+                            .onGeometryChange(for: Bool.self) { proxy in
+                                proxy.frame(in: .named("depthScroll")).maxY > 420
+                            } action: { syncFillsScreen = $0 }
                         hudAppearanceSection
                         visibilitySection
                         identitySection
-                        syncSection
                         exportSection
                         statusSection
                     }
@@ -112,11 +136,29 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity, alignment: .top)
                 }
                 .scrollIndicators(.hidden)
+                .coordinateSpace(.named("depthScroll"))
                 .toolbar(.hidden, for: .navigationBar)
                 .background(.clear)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(.clear)
+        }
+        .overlay(alignment: .top) {
+            if showsDockedPreview {
+                DockedPreviewPanel(aspect: stageRatio, playback: playback) {
+                    DiveFloatingPreview(
+                        playback: playback,
+                        samples: diveRecord?.samples ?? [],
+                        sync: currentSync,
+                        demoReading: demoReading,
+                        maximumDepth: maximumDepth,
+                        deviceName: deviceName,
+                        settings: hudSettings
+                    )
+                }
+                .padding(.top, 6)
+                .transition(.opacity)
+            }
         }
         .overlay(alignment: .topTrailing) {
             if showingFloatingPreview {
@@ -124,7 +166,7 @@ struct ContentView: View {
                     DiveFloatingPreview(
                         playback: playback,
                         samples: diveRecord?.samples ?? [],
-                        sync: try? TimelineSync(offsetSeconds: hudSettings.syncOffset),
+                        sync: currentSync,
                         demoReading: demoReading,
                         maximumDepth: maximumDepth,
                         deviceName: deviceName,
@@ -221,7 +263,7 @@ struct ContentView: View {
                 }
                 PhotosPicker(selection: $selectedPhotoVideo, matching: .videos, photoLibrary: .shared()) {
                     importCardLabel(title: "從照片匯入影片",
-                                    subtitle: isImportingVideo ? "正在載入影片…" : (videoURL?.lastPathComponent ?? "直接選擇 iPhone 相簿影片"),
+                                    subtitle: isImportingVideo ? "正在載入影片…" : (videoOriginalName ?? videoURL?.lastPathComponent ?? "直接選擇 iPhone 相簿影片"),
                                     icon: "photo.on.rectangle", loading: isImportingVideo)
                 }
                 .buttonStyle(.plain)
@@ -247,7 +289,7 @@ struct ContentView: View {
 
     private var previewSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            sectionTitle("影像與 HUD 預覽", subtitle: "排版開啟時可直接拖曳任一 HUD 欄位；點選後可在 02 調整大小與旋轉。")
+            sectionTitle("影像與 HUD 預覽", subtitle: "排版開啟時可直接拖曳任一 HUD 欄位；點選後可在 03 調整大小與旋轉。")
             layoutButtons
 
             if playback.hasVideo {
@@ -255,24 +297,22 @@ struct ContentView: View {
                     Text("輸出版型").font(.caption.weight(.semibold)).foregroundStyle(DepthStudioColors.muted)
                     OutputAspectPicker(selection: $outputAspect)
                 }
-                if let sync = try? TimelineSync(offsetSeconds: hudSettings.syncOffset) {
-                    DiveStageView(
-                        playback: playback,
-                        samples: diveRecord?.samples ?? [],
-                        sync: sync,
-                        maximumDepth: maximumDepth,
-                        deviceName: deviceName,
-                        settings: $hudSettings,
-                        selectedHUDItem: $selectedHUDItem,
-                        isEditing: isEditingLayout
-                    )
-                    .aspectRatio(stageRatio, contentMode: .fit)
-                    .frame(maxWidth: .infinity)
-                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 16).stroke(DepthStudioColors.cyan.opacity(0.25), lineWidth: 1))
-                    .accessibilityElement(children: .contain)
-                    .accessibilityIdentifier("previewStage")
-                }
+                DiveStageView(
+                    playback: playback,
+                    samples: diveRecord?.samples ?? [],
+                    sync: currentSync,
+                    maximumDepth: maximumDepth,
+                    deviceName: deviceName,
+                    settings: $hudSettings,
+                    selectedHUDItem: $selectedHUDItem,
+                    isEditing: isEditingLayout
+                )
+                .aspectRatio(stageRatio, contentMode: .fit)
+                .frame(maxWidth: .infinity)
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 16).stroke(DepthStudioColors.cyan.opacity(0.25), lineWidth: 1))
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("previewStage")
                 PlaybackControls(playback: playback)
             } else {
                 GeometryReader { proxy in
@@ -414,7 +454,7 @@ struct ContentView: View {
             }
             .padding(.top, 10)
         } label: {
-            sectionHeader("02 / HUD 外觀與自由排版", subtitle: "每個欄位可獨立移動、縮放與旋轉。")
+            sectionHeader("03 / HUD 外觀與自由排版", subtitle: "每個欄位可獨立移動、縮放與旋轉。")
         }
         .tint(DepthStudioColors.cyan)
         .padding(14)
@@ -442,7 +482,7 @@ struct ContentView: View {
             }
             .padding(.top, 10)
         } label: {
-            sectionHeader("03 / HUD 資訊顯示與隱藏", subtitle: "單獨隱藏不會影響其他資訊欄位。")
+            sectionHeader("04 / HUD 資訊顯示與隱藏", subtitle: "單獨隱藏不會影響其他資訊欄位。")
         }
         .tint(DepthStudioColors.cyan)
         .padding(14)
@@ -472,31 +512,47 @@ struct ContentView: View {
             }
             .padding(.top, 10)
         } label: {
-            sectionHeader("04 / 姓名與國家旗幟", subtitle: "支援七個國家／地區及六種潛水種類。")
+            sectionHeader("05 / 姓名與國家旗幟", subtitle: "支援七個國家／地區及六種潛水種類。")
         }
         .tint(DepthStudioColors.cyan)
         .padding(14)
         .background(DepthStudioColors.card, in: RoundedRectangle(cornerRadius: 18))
     }
 
+    /// 02: the dive summary (collapsed to one line) and the time sync, right under the
+    /// preview so the video stays in view while marking times.
     private var syncSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            sectionHeader("05 / 潛水紀錄摘要與時間同步", subtitle: "影片與手錶紀錄時間差，支援 -120 至 +120 秒。")
-            HStack {
-                Text("影片與潛水資料時間差")
-                Spacer()
-                Text(String(format: "%+.1f 秒", hudSettings.syncOffset)).monospacedDigit().foregroundStyle(DepthStudioColors.cyan)
+        VStack(alignment: .leading, spacing: 12) {
+            sectionHeader("02 / 潛水紀錄摘要與時間同步", subtitle: "選擇同步模式，一邊看影片一邊擷取時間點。")
+            if let diveRecord {
+                DisclosureGroup(isExpanded: $summaryExpanded) {
+                    diveSummary(diveRecord).padding(.top, 8)
+                } label: {
+                    Text(summaryLine(diveRecord))
+                        .font(.caption.weight(.semibold).monospacedDigit())
+                        .foregroundStyle(DepthStudioColors.cyan)
+                        .accessibilityIdentifier("summary.line")
+                }
+                .tint(DepthStudioColors.cyan)
+                .accessibilityIdentifier("summary.toggle")
             }
-            Slider(value: $hudSettings.syncOffset, in: -120...120, step: 0.5).tint(DepthStudioColors.cyan)
-            if let diveRecord { diveSummary(diveRecord) }
+            DiveSyncPanel(state: $syncState, landmarks: landmarks, samples: diveRecord?.samples ?? [],
+                          playback: playback, videoURL: videoURL)
         }
         .padding(14)
         .background(DepthStudioColors.card, in: RoundedRectangle(cornerRadius: 18))
     }
 
+    /// 「最大深度 30.0 m｜潛水時間 01:05」
+    private func summaryLine(_ record: DiveRecord) -> String {
+        let depth = record.maximumDepthMeters ?? record.samples.map(\.depthMeters).max() ?? 0
+        let duration = record.durationSeconds ?? record.samples.map(\.elapsedSeconds).max() ?? 0
+        return "潛水紀錄摘要：最大深度 \(String(format: "%.1f m", depth))｜潛水時間 \(timeLabel(duration))"
+    }
+
     private var exportSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            sectionTitle("06 / 輸出影片", subtitle: "依來源影片的畫質輸出 MP4，依選擇的版型裁切，保留來源影像與音訊。")
+            sectionTitle("06 / 輸出影片", subtitle: "依來源影片的畫質輸出新的 MP4，依選擇的版型裁切，保留來源影像與音訊。")
             Text(outputSpecText)
                 .font(.caption.weight(.semibold)).foregroundStyle(DepthStudioColors.muted)
                 .accessibilityIdentifier("export.spec")
@@ -504,7 +560,7 @@ struct ContentView: View {
                 HStack {
                     if isExporting { ProgressView().tint(.black) }
                     Image(systemName: "square.and.arrow.down.on.square")
-                    Text(isExporting ? "正在輸出影片…" : "輸出影片")
+                    Text(isExporting ? "正在輸出影片…" : "輸出影片（另存新檔）")
                 }
                 .font(.headline.weight(.bold))
                 .frame(maxWidth: .infinity)
@@ -515,6 +571,9 @@ struct ContentView: View {
             .buttonStyle(.plain)
             .disabled(!canExport)
             .accessibilityIdentifier("export.start")
+            Label("輸出影片不會覆蓋原始影片。", systemImage: "checkmark.shield")
+                .font(.caption2.weight(.semibold)).foregroundStyle(DepthStudioColors.muted)
+                .accessibilityIdentifier("export.keepsOriginal")
 
             if isExporting { ProgressView(value: exportProgress).tint(DepthStudioColors.cyan) }
             Text(isExporting ? exportClock.label(progress: exportProgress) : exportInfo)
@@ -741,6 +800,8 @@ struct ContentView: View {
                 }
                 DispatchQueue.main.async {
                     diveRecord = record
+                    // The previous log's sync does not apply to this one.
+                    syncState.reset()
                     diveLogFileName = selectedURL.lastPathComponent
                     diveLogFormat = format
                     isImportingDiveLog = false
@@ -767,7 +828,7 @@ struct ContentView: View {
             guard let imported = try await item.loadTransferable(type: ImportedMovie.self) else {
                 throw VideoImportError.transferUnavailable
             }
-            applyImportedVideo(imported.url, displayName: imported.url.lastPathComponent)
+            applyImportedVideo(imported.url, displayName: imported.originalName ?? imported.url.lastPathComponent)
         } catch {
             errorMessage = "照片影片匯入失敗：\(error.localizedDescription)"
             statusMessage = "請重新選取影片，或改用「從檔案 App 選取影片」。"
@@ -791,14 +852,18 @@ struct ContentView: View {
 
     private func applyImportedVideo(_ url: URL, displayName: String) {
         videoURL = url
+        videoOriginalName = displayName
         playback.load(url: url)
         exportedVideoURL = nil
-        statusMessage = "影片匯入成功（\(displayName)）。請確認與手錶紀錄相同一趟潛水，再微調時間差。"
+        // The previous video's sync does not apply to this one.
+        syncState.reset()
+        statusMessage = "影片匯入成功（\(displayName)）。請確認與手錶紀錄相同一趟潛水，再到 02 設定時間同步。"
         errorMessage = nil
     }
 
     private func loadDemoData() {
         diveRecord = Self.demoDiveRecord
+        syncState.reset()
         diveLogFileName = "V8.18 示範資料"
         diveLogFormat = "示範潛水紀錄"
         statusMessage = "已載入 ATMOS Mission2 示範紀錄：37 個 waypoint，最大深度 11.9 m。"
@@ -807,39 +872,38 @@ struct ContentView: View {
 
     private func exportVideo() {
         guard let videoURL, let record = diveRecord else { return }
-        do {
-            let sync = try TimelineSync(offsetSeconds: hudSettings.syncOffset)
-            let destination = FileManager.default.temporaryDirectory
-                .appendingPathComponent("DepthStudio_\(UUID().uuidString).mp4")
-            playback.pause()
-            isExporting = true
-            exportProgress = 0
-            exportClock = ExportProgressClock()
-            exportedVideoURL = nil
-            exportInfo = "正在分析來源影片並準備 MP4…"
-            statusMessage = "開始輸出，請保持 App 在前景並避免中途關閉。"
-            let settings = DiveExportSettings(hudSettings: hudSettings, deviceName: record.computerModel ?? "DEPTH STUDIO")
-            DiveVideoExporter().export(videoURL: videoURL, samples: record.samples, maximumDepth: maximumDepth, sync: sync,
-                                       settings: settings, aspect: outputAspect, outputURL: destination,
-                                       progress: { value in
-                DispatchQueue.main.async { exportProgress = value }
-            }, completion: { result in
-                DispatchQueue.main.async {
-                    isExporting = false
-                    switch result {
-                    case .success(let outputURL):
-                        exportedVideoURL = outputURL
-                        exportInfo = "MP4 已完成（\(outputSpecText.replacingOccurrences(of: "輸出規格：", with: ""))），已通過影片軌、尺寸、音訊及 MP4 容器檢查。"
-                        Task { await saveExportToPhotos(outputURL) }
-                    case .failure(let error):
-                        errorMessage = "影片輸出失敗：\(error.localizedDescription)"
-                        statusMessage = "輸出未完成，沒有產生可用影片。"
-                    }
+        // The same sync as the preview, applied once.
+        let sync = currentSync
+        // Always a new file; the imported video is never written to.
+        let destination = ExportNaming.nextOutputURL(originalName: videoOriginalName ?? videoURL.lastPathComponent,
+                                                     sourceURL: videoURL)
+        playback.pause()
+        isExporting = true
+        exportProgress = 0
+        exportClock = ExportProgressClock()
+        exportedVideoURL = nil
+        exportInfo = "正在分析來源影片並準備 MP4…"
+        statusMessage = "開始輸出，請保持 App 在前景並避免中途關閉。"
+        let settings = DiveExportSettings(hudSettings: hudSettings, deviceName: record.computerModel ?? "DEPTH STUDIO")
+        DiveVideoExporter().export(videoURL: videoURL, samples: record.samples, maximumDepth: maximumDepth, sync: sync,
+                                   settings: settings, aspect: outputAspect, outputURL: destination,
+                                   progress: { value in
+            DispatchQueue.main.async { exportProgress = value }
+        }, completion: { result in
+            DispatchQueue.main.async {
+                isExporting = false
+                switch result {
+                case .success(let outputURL):
+                    exportedVideoURL = outputURL
+                    ExportNaming.recordExport(at: outputURL, originalName: videoOriginalName ?? videoURL.lastPathComponent)
+                    exportInfo = "MP4 已完成：\(outputURL.lastPathComponent)（\(outputSpecText.replacingOccurrences(of: "輸出規格：", with: ""))），已通過影片軌、尺寸、音訊及 MP4 容器檢查。"
+                    Task { await saveExportToPhotos(outputURL) }
+                case .failure(let error):
+                    errorMessage = "影片輸出失敗：\(error.localizedDescription)"
+                    statusMessage = "輸出未完成，沒有產生可用影片。"
                 }
-            })
-        } catch {
-            errorMessage = "無法開始輸出：\(error.localizedDescription)"
-        }
+            }
+        })
     }
 
     @MainActor
@@ -852,15 +916,8 @@ struct ContentView: View {
             return
         }
         do {
-            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                PHPhotoLibrary.shared().performChanges({
-                    PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: url)
-                }) { success, error in
-                    if success { continuation.resume() }
-                    else { continuation.resume(throwing: error ?? PhotoSaveError.saveFailed) }
-                }
-            }
-            statusMessage = "影片已成功儲存至 iPhone 照片。"
+            try await PhotoLibrarySaver.saveNewVideo(at: url)
+            statusMessage = "影片已另存為新的照片項目（\(url.lastPathComponent)），原始影片沒有被修改。"
         } catch {
             errorMessage = "影片已輸出，但儲存到照片失敗：\(error.localizedDescription)。可使用分享按鈕另存。"
         }
@@ -929,11 +986,6 @@ struct DepthStudioRootView: View {
     private func switchMode(to newMode: DiveMode?) {
         withAnimation(.easeInOut(duration: 0.3)) { mode = newMode }
     }
-}
-
-private enum PhotoSaveError: LocalizedError {
-    case saveFailed
-    var errorDescription: String? { "iOS 照片圖庫無法建立影片項目。" }
 }
 
 private struct DepthStudioLaunchAnimation: View {

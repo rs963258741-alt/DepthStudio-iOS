@@ -152,6 +152,8 @@ final class PlaybackController {
     private(set) var videoAspect: CGFloat?
     /// Display size in pixels of the loaded video (after rotation), once it is known.
     private(set) var videoSize: CGSize?
+    /// Duration of one frame of the loaded video, once it is known (for frame stepping).
+    private(set) var frameDuration: Double?
 
     @ObservationIgnored private var timeObserver: Any?
     @ObservationIgnored private var statusObservation: NSKeyValueObservation?
@@ -186,6 +188,8 @@ final class PlaybackController {
             self.videoAspect = info.size.width / info.size.height
             self.videoSize = info.size
             if info.duration > 0 { self.duration = info.duration }
+            let frame = await Self.loadFrameDuration(url: url)
+            if self.url == url { self.frameDuration = frame }
         }
     }
 
@@ -202,6 +206,7 @@ final class PlaybackController {
         isPlaying = false
         videoAspect = nil
         videoSize = nil
+        frameDuration = nil
     }
 
     func seek(to seconds: Double) {
@@ -227,6 +232,36 @@ final class PlaybackController {
     func step(by delta: Double) {
         pause()
         seek(to: currentTime + delta)
+    }
+
+    /// The player's own current time (not the last periodic update), for capturing a
+    /// video time exactly where the video is.
+    var preciseTime: Double {
+        guard let seconds = player?.currentTime().seconds, seconds.isFinite else { return currentTime }
+        let upper = duration > 0 ? duration : seconds
+        return min(max(0, seconds), upper)
+    }
+
+    /// Pauses and moves from the player's exact time (fine positioning: ±0.1 s).
+    func stepPrecisely(by delta: Double) {
+        pause()
+        seek(to: preciseTime + delta)
+    }
+
+    /// Pauses and moves by whole frames (上一影格／下一影格); nil frame rate falls back to 1/30 s.
+    func stepFrames(_ count: Int) {
+        let frame = frameDuration ?? 1.0 / 30
+        stepPrecisely(by: Double(count) * frame)
+    }
+
+    nonisolated static func loadFrameDuration(url: URL) async -> Double? {
+        let asset = AVURLAsset(url: url)
+        guard let track = try? await asset.loadTracks(withMediaType: .video).first else { return nil }
+        if let minimum = try? await track.load(.minFrameDuration), minimum.seconds.isFinite, minimum.seconds > 0 {
+            return minimum.seconds
+        }
+        if let rate = try? await track.load(.nominalFrameRate), rate > 0 { return 1 / Double(rate) }
+        return nil
     }
 
     nonisolated static func loadVideoInfo(url: URL) async -> (size: CGSize, duration: Double)? {

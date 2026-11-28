@@ -65,8 +65,10 @@ class WebV818NativeParityTests(unittest.TestCase):
         self.assertIn('"chinesetaipei"', SETTINGS)
 
     def test_editor_ranges_and_reset_actions_match_web(self):
+        # The ±120 s sync range is the 手動同步 slider (DiveSync.swift) since 1.5.
+        sync = (ROOT / "DiveSync.swift").read_text(encoding="utf-8")
         for marker in ["0.3...3.0", "0...359", "0.2...1.0", "0.7...1.4", "-15...25", "-120...120", "0.6...1.8"]:
-            self.assertIn(marker, CONTENT)
+            self.assertIn(marker, CONTENT + sync)
         for action in ["恢復預設位置", "重設此項目", "全部顯示", "全部隱藏", "重設外觀"]:
             self.assertIn(action, CONTENT)
         self.assertIn("(threshold 2% of stage)", HUD)
@@ -82,7 +84,7 @@ class WebV818NativeParityTests(unittest.TestCase):
         self.assertIn("HUDVideoCompositor", EXPORTER)
         self.assertIn("countCompressedVideoSamples", EXPORTER)
         self.assertIn("decodeFirstVideoFrame", EXPORTER)
-        self.assertIn("PHPhotoLibrary.shared().performChanges", CONTENT)
+        self.assertIn("PhotoLibrarySaver.saveNewVideo(at:", CONTENT)
 
 
 if __name__ == "__main__":

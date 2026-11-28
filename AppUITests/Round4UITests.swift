@@ -92,7 +92,7 @@ final class Round4UITests: XCTestCase {
         screenshot("depth-value-with-unit", app)
 
         // The 03 list has no 深度單位 switch any more.
-        let header = app.staticTexts["03 / HUD 資訊顯示與隱藏"]
+        let header = app.staticTexts["04 / HUD 資訊顯示與隱藏"]
         bringIntoView(header, in: app)
         header.tap()
         XCTAssertTrue(app.switches["visibility.depthValue"].waitForExistence(timeout: 5))
@@ -114,7 +114,7 @@ final class Round4UITests: XCTestCase {
         bringIntoView(stage(app), in: app)
         screenshot("depth-gauge", app)
 
-        let header = app.staticTexts["03 / HUD 資訊顯示與隱藏"]
+        let header = app.staticTexts["04 / HUD 資訊顯示與隱藏"]
         bringIntoView(header, in: app)
         header.tap()
         let toggle = app.switches["visibility.depthGauge"]

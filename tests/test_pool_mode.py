@@ -68,7 +68,8 @@ class PoolScreenWiringTests(unittest.TestCase):
         self.assertIn("loadTransferable(type: ImportedMovie.self)", VIEW)
         self.assertIn("session.setTime(playback.currentTime, for: node.id)", VIEW)
         self.assertIn("DiveVideoExporter().exportPool(", VIEW)
-        self.assertIn("PHPhotoLibrary.shared().performChanges", VIEW)
+        self.assertIn("PhotoLibrarySaver.saveNewVideo(at:", VIEW)
+        self.assertIn("ExportNaming.nextOutputURL(", VIEW)
         self.assertIn("aspectRatio(9.0 / 16.0", VIEW)
 
     def test_pool_export_reuses_the_shared_4k_path(self):

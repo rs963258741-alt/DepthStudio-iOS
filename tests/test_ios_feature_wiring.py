@@ -66,7 +66,11 @@ class IOSFeatureWiringTests(unittest.TestCase):
         self.assertIn('"ftyp"', EXPORTER)
         self.assertIn('"moov"', EXPORTER)
         self.assertIn('"mdat"', EXPORTER)
-        self.assertIn("PHPhotoLibrary.shared().performChanges", CONTENT)
+        # Saved to Photos as a new item (never changing the original), see ExportNaming.swift.
+        self.assertIn("PhotoLibrarySaver.saveNewVideo(at:", CONTENT)
+        naming = (ROOT / "ExportNaming.swift").read_text(encoding="utf-8")
+        self.assertIn("PHPhotoLibrary.shared().performChanges", naming)
+        self.assertIn("PHAssetCreationRequest.forAsset()", naming)
 
     def test_xcodegen_includes_all_new_assets_and_settings(self):
         self.assertIn("- path: HUDSettings.swift", PROJECT)

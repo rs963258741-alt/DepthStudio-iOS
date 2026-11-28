@@ -21,6 +21,9 @@
 - 深度／距離單位（1.4 起）：「M」是即時深度數值（`depthValue`）與累積距離數值（`distanceValue`）的一部分，固定在數值右下角（同一基線），不能單獨移動；沒有 `depthUnit`／`distanceUnit` 欄位了（舊設定由 `mergingDefaults` 移除）。text spec 的 `unit`；預覽 `HUDTextView(unitLabel:)`、輸出 `HUDLayerFactory.textItem(unitLabel:)` 都用兩個文字層畫同一行「數值 單位」（`HUDValueUnitLine`，各自只顯示一部分），各自保留顏色與光暈。隨時間變的這種文字用 `HUDLayerTracks.format`／`show`。
 - 垂直深度指示計（`DepthGauge.swift`，欄位 `depthGauge`）：`DepthGaugeGeometry`（170×400 設計單位，以畫面短邊 0.56 倍為高；刻度依最大深度選 10／20／30…／100（每 10 m）…）預覽 `DepthGaugeView` 與輸出 `DepthGaugeLayerBuilder` 共用。青色標記＝目前深度（輸出時為會移動且數字會變的 sprite，只在潛水期間出現），白色標記＝最大深度。字型 DIN Condensed Bold。
 - 泳池時間輸入：`PoolFormat.parseTime(_:videoDuration:)`；超過影片長度的時間會被拒絕並提示（之前使用者輸入 `00:12:30` 被當成 12 分 30 秒，出發時間在影片結束之後，HUD 整段停在 0.0 m／00:00）；三段式時間若以時:分:秒會超過影片，則當成 分:秒:小數。摘要卡在出發／出水時間超出影片時顯示警告（`timeline.warning`）。輸入時間的 alert 用 `presenting:` 把節點傳給按鈕。
+- 時間同步 Smart Sync（1.5 起，深度潛水）：`DiveSync.swift` 是三種模式（智慧／進階／手動同步）共用的核心 `DiveSyncState`：**數據時間 = 影片時間 − delay**（delay > 0 數據延後）。轉成 `TimelineSync(offsetSeconds: -delay)` 只在 `timelineSync` 一處；舞台、浮動預覽、固定預覽與輸出都用 `ContentView.currentSync`，不要再用 `hudSettings.syncOffset`（只為舊設定相容而保留，已不使用）。`DiveLogLandmarks` 從樣本找首次抵達／停留結束的最大深度，開始下潛與回到水面只有手錶真的記錄到水面（≤0.5 m）才有，否則顯示無法驗證。智慧／進階：設定影片最大深度時間即套用 delay；進階的其他時間點只做誤差驗證（0–1 良好、≤3 微調、>3 重新確認），不改數據。手動：滑桿 ±120 秒、輸入 ±3600 秒、±0.1／±1、自動對齊、任意時間點定位、雙時間軸（`DiveSyncTimelineView`：影片固定，手錶曲線隨 delay 移動，可拖曳）。切換模式保留時間與 delay；手動改過後回到智慧／進階只顯示「套用計算結果」不自動覆蓋。換影片、換潛水紀錄、載入示範資料都會 `syncState.reset()`。UI 在 `DiveSyncPanel.swift`。
+- 深度潛水畫面順序（1.5）：01 匯入 → 影像與 HUD 預覽（含播放控制，不編號）→ 02 潛水紀錄摘要與時間同步（摘要預設收合成一行）→ 03 HUD 外觀與自由排版 → 04 顯示與隱藏 → 05 姓名與國旗 → 06 輸出影片。預覽下方重複的摘要已移除。主預覽捲出畫面且 02 區塊仍佔滿下方時，頂端顯示 `DockedPreviewPanel`（同一個播放器、即時 HUD、播放控制；浮動預覽開啟時不顯示；只在 02 區塊範圍內出現，不會蓋到其他區塊）。
+- 輸出一律另存新檔（`ExportNaming.swift`）：`原始檔名_DepthStudio.mp4`、`_02`、`_03`…（成功後 `recordExport` 記錄編號，跨啟動延續；已存在的檔名與來源本身會跳過），存到照片用 `PhotoLibrarySaver`（`PHAssetCreationRequest` 新項目，檔名 = 輸出檔名）。匯入的影片是 App 內的複本，原始影片不會被改動。`ImportedMovie.originalName` 保留照片中的原始檔名。
 - 輸出合成（`HUDVideoCompositor.swift`）：自訂 `AVVideoCompositing`，每一格用 Core Image 合成「來源畫面（旋轉＋置中裁切）＋該時間的 HUD」。隨時間變化的內容（數值文字、曲線標記位置、顯示區間）由 `HUDLayerFactory.addSampledText／addPositionAnimation／addVisibility` 記錄成 `HUDLayerTracks`，由 `HUDOverlayRenderer` 逐格計算；不要再用 Core Animation keyframe 動畫（1.2 在實機上動畫被忽略：數據不動、一開始隱藏的欄位不出現）。每個欄位只在內容改變時重畫，移動的標記只平移。
 - HUD 欄位的手勢必須加在 `.position()` 之前（否則觸控範圍變成整個畫面），並用 `.allowsHitTesting(isEditing)`。
 - 泳池平潛速率：`PoolTimeline` 以 0.1 秒為單位的速率曲線，各段距離固定等於標記；`PoolMotionAnalyzer`（Vision 光流＋人體／顯著物偵測）提供 AI 形狀，否則為 ±0.22 m/s 內的模擬浮動。
@@ -78,7 +81,7 @@ GitHub 的 macOS runner 曾整段時間拿不到機器（job 排隊 15 分鐘後
 ### 自動測試（iPhone 模擬器）
 
 - `AppTests/`（XCTest）：泳池計算、輸出尺寸、預設1／2、樣式、吸附、實際輸出含 HUD 的影片並逐格比對、輸出與預覽比對；圖片寫到 `build/test-artifacts/`（`*-preview-vs-export.png`、`*-expected-vs-exported.png`、`stage-vs-floating-preview.png`）。
-- `AppUITests/`（XCUITest）：拖曳每個 HUD 欄位、排版開關、預設1／2 儲存與套用（含重新啟動）、各版型置中吸附、浮動預覽即時且等比例、AI 提醒、樣式控制、輸出規格。
+- `AppUITests/`（XCUITest）：拖曳每個 HUD 欄位、排版開關、預設1／2 儲存與套用（含重新啟動）、各版型置中吸附、浮動預覽即時且等比例、AI 提醒、樣式控制、輸出規格；`SmartSyncUITests`：區塊順序、三種同步模式、擷取時間、進階驗證、手動時間軸與偏移、固定預覽、另存新檔。同步區塊的控制項請捲到畫面 470 pt 以下再點（固定預覽可能蓋住上方）。
 - 執行：`scripts/ci_test.sh`；Codemagic workflow `depth-studio-tests`（`POST /builds` 的 `workflowId`）。修改 HUD、輸出或排版相關程式後都要跑一次，並下載比對圖檢查。
 - 只跑部分測試：環境變數 `TEST_FILTER`（空白或逗號分隔，例如 `DepthStudioTests/ExportPipelineTests DepthStudioUITests/Round3UITests`），用 Codemagic `POST /builds` 的 `"environment": {"variables": {"TEST_FILTER": "..."}}` 帶入。
 - 含 HUD 的完整輸出在模擬器可以實際執行（自訂合成器不經過 Core Animation 的輸出工具）：`ExportPipelineTests` 會輸出含 HUD 的影片，逐格與「來源畫面＋該時間的 HUD」比對，並確認數值會變、即時欄位在潛水期間出現。
